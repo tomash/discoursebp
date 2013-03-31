@@ -1,0 +1,7 @@
+smtp_settings:
+  domain: "forum.wfb-pol.org"
+  address: "smtp.sendgrid.net"
+  port: 587
+  user_name: "HERP@DERP"
+  password: "HURR"
+  sender: "DURR@LOL"
