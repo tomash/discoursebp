@@ -15,9 +15,11 @@ class SiteSetting < ActiveRecord::Base
   setting(:company_full_name, 'My Unconfigured Forum Ltd.')
   setting(:company_short_name, 'Unconfigured Forum')
   setting(:company_domain, 'www.example.com')
+  setting(:api_key, '')
   client_setting(:traditional_markdown_linebreaks, false)
-  client_setting(:top_menu, 'popular|new|unread|favorited|categories')
+  client_setting(:top_menu, 'latest|hot|new|unread|favorited|categories')
   client_setting(:post_menu, 'like|edit|flag|delete|share|bookmark|reply')
+  client_setting(:share_links, 'twitter|facebook|google+')
   client_setting(:track_external_right_clicks, false)
   client_setting(:must_approve_users, false)
   client_setting(:ga_tracking_code, "")
@@ -168,6 +170,15 @@ class SiteSetting < ActiveRecord::Base
 
   setting(:max_similar_results, 7)
 
+  def self.generate_api_key!
+    self.api_key = SecureRandom.hex(32)
+  end
+
+  def self.api_key_valid?(tested)
+    t = tested.strip
+    t.length == 64 && t == self.api_key
+  end
+
   def self.call_discourse_hub?
     self.enforce_global_nicknames? && self.discourse_org_access_key.present?
   end
@@ -179,4 +190,13 @@ class SiteSetting < ActiveRecord::Base
   def self.post_length
     min_post_length..max_post_length
   end
+
+  def self.homepage
+    top_menu.split('|')[0]
+  end
+
+  def self.anonymous_homepage
+    top_menu.split('|').select{ |f| ['latest', 'hot', 'categories', 'category'].include? f }[0]
+  end
+
 end
