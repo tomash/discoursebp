@@ -36,6 +36,18 @@ after "deploy:setup" do
   run "cd #{current_path} && bundle install"
 end
 
+desc "Link in the shared stuff"
+task :make_symlinks do
+  run "ln -nfs #{deploy_to}/#{shared_dir}/config/application.yml #{release_path}/config/application.yml"
+  run "ln -nfs #{deploy_to}/#{shared_dir}/config/database.yml #{release_path}/config/database.yml"
+  run "ln -nfs #{deploy_to}/#{shared_dir}/config/redis.yml #{release_path}/config/redis.yml"
+  run "ln -nfs #{deploy_to}/#{shared_dir}/assets #{release_path}/public/assets"
+  # run "ln -nfs #{deploy_to}/#{shared_dir}/certs #{release_path}/certs"
+end
+
+before "deploy:assets:precompile", "make_symlinks"
+
+
 # Seed the database
  
  
