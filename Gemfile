@@ -103,6 +103,7 @@ group :development do
   gem 'binding_of_caller'
   gem 'librarian', '>= 0.0.25', require: false
   gem 'pry-rails'  
+  gem 'capistrano'
 end
 
 # IMPORTANT: mini profiler monkey patches, so it better be required last
