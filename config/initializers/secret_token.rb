@@ -7,7 +7,8 @@
 # Generate a new secret with "rake secret".  Copy the output of that command and paste it
 # in your secret_token.rb as the value of Discourse::Application.config.secret_token:
 #
-# Discourse::Application.config.secret_token = "SET_SECRET_HERE"
+APP_CONFIG = YAML.load(File.read(File.join(Rails.root, "config", "application.yml")))
+Discourse::Application.config.secret_token = APP_CONFIG['secret_token']
 
 # delete all lines below in production
 if Rails.env.test? || Rails.env.development? || Rails.env == "profile"
