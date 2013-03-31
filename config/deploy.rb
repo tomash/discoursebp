@@ -53,8 +53,8 @@ before "deploy:assets:precompile", "make_symlinks"
  
  
 # Bluepill related tasks
-after "deploy:update", "bluepill:quit", "bluepill:start"
- 
+# after "deploy:update", "bluepill:quit", "bluepill:start"
+
 namespace :bluepill do
   desc "Stop processes that bluepill is monitoring and quit bluepill"
   task :quit, :roles => [:app] do
