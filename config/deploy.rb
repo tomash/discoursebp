@@ -24,8 +24,8 @@ set :user, "borderprinces"
 set :rails_env, :production
 
 role :app, "forum.wfb-pol.org"
-role :db, "forum.wfb-pol.org"
-role :web, "forum.wfb-pol.org", :primary => true
+role :web, "forum.wfb-pol.org"
+role :db, "forum.wfb-pol.org", :primary => true
 
 set :default_environment, {
   'PATH' => '/usr/local/bin:$PATH'
