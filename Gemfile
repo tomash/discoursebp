@@ -161,6 +161,7 @@ group :test, :development do
   gem 'pry-rails'
   gem 'pry-nav'
   gem 'spork-rails', :github => 'sporkrb/spork-rails'
+  gem 'capistrano'
 end
 
 group :development do
