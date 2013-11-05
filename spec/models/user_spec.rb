@@ -1,4 +1,5 @@
 require 'spec_helper'
+require_dependency 'user'
 
 describe User do
 
@@ -21,58 +22,6 @@ describe User do
   it { should validate_presence_of :username }
   it { should validate_presence_of :email }
 
-  context '#update_view_counts' do
-
-    let(:user) { Fabricate(:user) }
-
-    context 'topics_entered' do
-      context 'without any views' do
-        it "doesn't increase the user's topics_entered" do
-          lambda { User.update_view_counts; user.reload }.should_not change(user, :topics_entered)
-        end
-      end
-
-      context 'with a view' do
-        let(:topic) { Fabricate(:topic) }
-        let!(:view) { View.create_for(topic, '127.0.0.1', user) }
-
-        it "adds one to the topics entered" do
-          User.update_view_counts
-          user.reload
-          user.topics_entered.should == 1
-        end
-
-        it "won't record a second view as a different topic" do
-          View.create_for(topic, '127.0.0.1', user)
-          User.update_view_counts
-          user.reload
-          user.topics_entered.should == 1
-        end
-
-      end
-    end
-
-    context 'posts_read_count' do
-      context 'without any post timings' do
-        it "doesn't increase the user's posts_read_count" do
-          lambda { User.update_view_counts; user.reload }.should_not change(user, :posts_read_count)
-        end
-      end
-
-      context 'with a post timing' do
-        let!(:post) { Fabricate(:post) }
-        let!(:post_timings) do
-          PostTiming.record_timing(msecs: 1234, topic_id: post.topic_id, user_id: user.id, post_number: post.post_number)
-        end
-
-        it "increases posts_read_count" do
-          User.update_view_counts
-          user.reload
-          user.posts_read_count.should == 1
-        end
-      end
-    end
-  end
 
   context '.enqueue_welcome_message' do
     let(:user) { Fabricate(:user) }
@@ -94,8 +43,10 @@ describe User do
     let(:user) { Fabricate(:user) }
     let(:admin) { Fabricate(:admin) }
 
-    it "generates a welcome message" do
-      user.expects(:enqueue_welcome_message).with('welcome_approved')
+    it "enqueues a 'signup after approval' email" do
+      Jobs.expects(:enqueue).with(
+        :user_email, has_entries(type: :signup_after_approval)
+      )
       user.approve(admin)
     end
 
@@ -194,6 +145,19 @@ describe User do
       end
     end
 
+    describe 'change the case of my username' do
+      let!(:myself) { Fabricate(:user, username: 'hansolo') }
+
+      it 'should return true' do
+        myself.change_username('HanSolo').should be_true
+      end
+
+      it 'should change the username' do
+        myself.change_username('HanSolo')
+        myself.reload.username.should == 'HanSolo'
+      end
+    end
+
   end
 
   describe 'delete posts' do
@@ -208,12 +172,10 @@ describe User do
 
     it 'allows moderator to delete all posts' do
       @user.delete_all_posts!(@guardian)
+      expect(Post.where(id: @posts.map(&:id))).to be_empty
       @posts.each do |p|
-        p.reload
-        if p
-          p.topic.should be_nil
-        else
-          p.should be_nil
+        if p.post_number == 1
+          expect(Topic.where(id: p.topic_id).first).to be_nil
         end
       end
     end
@@ -243,13 +205,26 @@ describe User do
     it { should_not be_approved }
     its(:approved_at) { should be_blank }
     its(:approved_by_id) { should be_blank }
-    its(:email_digests) { should be_true }
     its(:email_private_messages) { should be_true }
     its(:email_direct ) { should be_true }
-    its(:time_read) { should == 0}
 
-    # Default to digests after one week
-    its(:digest_after_days) { should == 7 }
+    context 'digest emails' do
+      it 'defaults to digests every week' do
+        subject.email_digests.should be_true
+        subject.digest_after_days.should == 7
+      end
+
+      it 'uses default_digest_email_frequency' do
+        SiteSetting.stubs(:default_digest_email_frequency).returns(1)
+        subject.email_digests.should be_true
+        subject.digest_after_days.should == 1
+      end
+
+      it 'disables digests by default if site setting says so' do
+        SiteSetting.stubs(:default_digest_email_frequency).returns('')
+        subject.email_digests.should be_false
+      end
+    end
 
     context 'after_save' do
       before do
@@ -259,15 +234,28 @@ describe User do
       its(:email_tokens) { should be_present }
       its(:bio_cooked) { should be_present }
       its(:bio_summary) { should be_present }
-      its(:topics_entered) { should == 0 }
-      its(:posts_read_count) { should == 0 }
+    end
+  end
+
+  describe 'ip address validation' do
+    it 'validates ip_address for new users' do
+      u = Fabricate.build(:user)
+      AllowedIpAddressValidator.any_instance.expects(:validate_each).with(u, :ip_address, u.ip_address)
+      u.valid?
+    end
+
+    it 'does not validate ip_address when updating an existing user' do
+      u = Fabricate(:user)
+      u.ip_address = '87.123.23.11'
+      AllowedIpAddressValidator.any_instance.expects(:validate_each).never
+      u.valid?
     end
   end
 
   describe "trust levels" do
 
-    # NOTE be sure to use build to avoid db calls 
-    let(:user) { Fabricate.build(:user, trust_level: TrustLevel.levels[:visitor]) }
+    # NOTE be sure to use build to avoid db calls
+    let(:user) { Fabricate.build(:user, trust_level: TrustLevel.levels[:newuser]) }
 
     it "sets to the default trust level setting" do
       SiteSetting.expects(:default_trust_level).returns(TrustLevel.levels[:elder])
@@ -281,7 +269,7 @@ describe User do
       end
 
       it "is true for your basic level" do
-        user.has_trust_level?(:visitor).should be_true
+        user.has_trust_level?(:newuser).should be_true
       end
 
       it "is false for a higher level" do
@@ -290,7 +278,7 @@ describe User do
 
       it "is true if you exceed the level" do
         user.trust_level = TrustLevel.levels[:elder]
-        user.has_trust_level?(:visitor).should be_true
+        user.has_trust_level?(:newuser).should be_true
       end
 
       it "is true for an admin even with a low trust level" do
@@ -311,14 +299,54 @@ describe User do
         user.has_trust_level?(:elder).should be_true
       end
 
-      it "is a moderator if the user is an admin" do
+      it "is staff if the user is an admin" do
         user.admin = true
-        user.moderator?.should be_true
+        user.staff?.should be_true
       end
 
     end
 
 
+  end
+
+  describe 'staff and regular users' do
+    let(:user) { Fabricate.build(:user) }
+
+    describe '#staff?' do
+      subject { user.staff? }
+
+      it { should be_false }
+
+      context 'for a moderator user' do
+        before { user.moderator = true }
+
+        it { should be_true }
+      end
+
+      context 'for an admin user' do
+        before { user.admin = true }
+
+        it { should be_true }
+      end
+    end
+
+    describe '#regular?' do
+      subject { user.regular? }
+
+      it { should be_true }
+
+      context 'for a moderator user' do
+        before { user.moderator = true }
+
+        it { should be_false }
+      end
+
+      context 'for an admin user' do
+        before { user.admin = true }
+
+        it { should be_false }
+      end
+    end
   end
 
   describe 'temporary_key' do
@@ -371,10 +399,6 @@ describe User do
   end
 
   describe 'name heuristics' do
-    it 'is able to guess a decent username from an email' do
-      User.suggest_username('bob@bob.com').should == 'bob'
-    end
-
     it 'is able to guess a decent name from an email' do
       User.suggest_name('sam.saffron@gmail.com').should == 'Sam Saffron'
     end
@@ -436,63 +460,6 @@ describe User do
     end
   end
 
-  describe '.suggest_username' do
-
-    it "doesn't raise an error on nil username" do
-      User.suggest_username(nil).should be_nil
-    end
-
-    it 'corrects weird characters' do
-      User.suggest_username("Darth%^Vadar").should == "Darth_Vadar"
-    end
-
-    it 'adds 1 to an existing username' do
-      user = Fabricate(:user)
-      User.suggest_username(user.username).should == "#{user.username}1"
-    end
-
-    it "adds numbers if it's too short" do
-      User.suggest_username('a').should == 'a11'
-    end
-
-    it "has a special case for me emails" do
-      User.suggest_username('me@eviltrout.com').should == 'eviltrout'
-    end
-
-    it "shortens very long suggestions" do
-      User.suggest_username("myreallylongnameisrobinwardesquire").should == 'myreallylongnam'
-    end
-
-    it "makes room for the digit added if the username is too long" do
-      User.create(username: 'myreallylongnam', email: 'fake@discourse.org')
-      User.suggest_username("myreallylongnam").should == 'myreallylongna1'
-    end
-
-    it "removes leading character if it is not alphanumeric" do
-      User.suggest_username("_myname").should == 'myname'
-    end
-
-    it "removes trailing characters if they are invalid" do
-      User.suggest_username("myname!^$=").should == 'myname'
-    end
-
-    it "replace dots" do
-      User.suggest_username("my.name").should == 'my_name'
-    end
-
-    it "remove leading dots" do
-      User.suggest_username(".myname").should == 'myname'
-    end
-
-    it "remove trailing dots" do
-      User.suggest_username("myname.").should == 'myname'
-    end
-
-    it 'should handle typical facebook usernames' do
-      User.suggest_username('roger.nelson.3344913').should == 'roger_nelson_33'
-    end
-  end
-
   describe 'email_validator' do
     it 'should allow good emails' do
       user = Fabricate.build(:user, email: 'good@gmail.com')
@@ -511,12 +478,12 @@ describe User do
       Fabricate.build(:user, email: 'notgood@trashmail.net').should_not be_valid
       Fabricate.build(:user, email: 'mailinator.com@gmail.com').should be_valid
     end
-    
+
     it 'should not reject partial matches' do
       SiteSetting.stubs(:email_domains_blacklist).returns('mail.com')
       Fabricate.build(:user, email: 'mailinator@gmail.com').should be_valid
     end
-    
+
     it 'should reject some emails based on the email_domains_blacklist site setting ignoring case' do
       SiteSetting.stubs(:email_domains_blacklist).returns('trashmail.net')
       Fabricate.build(:user, email: 'notgood@TRASHMAIL.NET').should_not be_valid
@@ -539,7 +506,7 @@ describe User do
       u.email = 'nope@mailinator.com'
       u.should_not be_valid
     end
-    
+
     it 'whitelist should reject some emails based on the email_domains_whitelist site setting' do
       SiteSetting.stubs(:email_domains_whitelist).returns('vaynermedia.com')
       Fabricate.build(:user, email: 'notgood@mailinator.com').should_not be_valid
@@ -565,7 +532,7 @@ describe User do
       u.should be_valid
     end
 
-    it 'email whitelist should be used when email is being changed' do      
+    it 'email whitelist should be used when email is being changed' do
       SiteSetting.stubs(:email_domains_whitelist).returns('vaynermedia.com')
       u = Fabricate(:user, email: 'good@vaynermedia.com')
       u.email = 'nope@mailinator.com'
@@ -575,7 +542,7 @@ describe User do
 
   describe 'passwords' do
     before do
-      @user = Fabricate.build(:user)
+      @user = Fabricate.build(:user, active: false)
       @user.password = "ilovepasta"
       @user.save!
     end
@@ -605,68 +572,38 @@ describe User do
   end
 
   describe "previous_visit_at" do
+
     let(:user) { Fabricate(:user) }
+    let!(:first_visit_date) { Time.zone.now }
+    let!(:second_visit_date) { 2.hours.from_now }
+    let!(:third_visit_date) { 5.hours.from_now }
 
     before do
       SiteSetting.stubs(:active_user_rate_limit_secs).returns(0)
+      SiteSetting.stubs(:previous_visit_timeout_hours).returns(1)
     end
 
-    it "should be blank on creation" do
+    it "should act correctly" do
       user.previous_visit_at.should be_nil
-    end
 
-    describe "first time" do
-      let!(:first_visit_date) { DateTime.now }
+      # first visit
+      user.update_last_seen!(first_visit_date)
+      user.previous_visit_at.should be_nil
 
-      before do
-        DateTime.stubs(:now).returns(first_visit_date)
-        user.update_last_seen!
-      end
+      # updated same time
+      user.update_last_seen!(first_visit_date)
+      user.reload
+      user.previous_visit_at.should be_nil
 
-      it "should have no value" do
-        user.previous_visit_at.should be_nil
-      end
+      # second visit
+      user.update_last_seen!(second_visit_date)
+      user.reload
+      user.previous_visit_at.should be_within_one_second_of(first_visit_date)
 
-      describe "another call right after" do
-        before do
-          # A different time, to make sure it doesn't change
-          DateTime.stubs(:now).returns(10.minutes.from_now)
-          user.update_last_seen!
-        end
-
-        it "still has no value" do
-          user.previous_visit_at.should be_nil
-        end
-      end
-
-      describe "second visit" do
-        let!(:second_visit_date) { 2.hours.from_now }
-
-        before do
-          DateTime.stubs(:now).returns(second_visit_date)
-          user.update_last_seen!
-        end
-
-        it "should have the previous visit value" do
-          user.previous_visit_at.should == first_visit_date
-        end
-
-        describe "third visit" do
-          let!(:third_visit_date) { 5.hours.from_now }
-
-          before do
-            DateTime.stubs(:now).returns(third_visit_date)
-            user.update_last_seen!
-          end
-
-          it "should have the second visit value" do
-            user.previous_visit_at.should == second_visit_date
-          end
-
-        end
-
-      end
-
+      # third visit
+      user.update_last_seen!(third_visit_date)
+      user.reload
+      user.previous_visit_at.should be_within_one_second_of(second_visit_date)
     end
 
   end
@@ -679,24 +616,28 @@ describe User do
     end
 
     it "should have 0 for days_visited" do
-      user.days_visited.should == 0
+      user.user_stat.days_visited.should == 0
     end
 
     describe 'with no previous values' do
-      let!(:date) { DateTime.now }
+      let!(:date) { Time.zone.now }
 
       before do
-        DateTime.stubs(:now).returns(date)
+        Timecop.freeze(date)
         user.update_last_seen!
       end
 
+      after do
+        Timecop.return
+      end
+
       it "updates last_seen_at" do
-        user.last_seen_at.should == date
+        user.last_seen_at.should be_within_one_second_of(date)
       end
 
       it "should have 0 for days_visited" do
         user.reload
-        user.days_visited.should == 1
+        user.user_stat.days_visited.should == 1
       end
 
       it "should log a user_visit with the date" do
@@ -706,14 +647,18 @@ describe User do
       context "called twice" do
 
         before do
-          DateTime.stubs(:now).returns(date)
+          Timecop.freeze(date)
           user.update_last_seen!
           user.update_last_seen!
           user.reload
         end
 
+        after do
+          Timecop.return
+        end
+
         it "doesn't increase days_visited twice" do
-          user.days_visited.should == 1
+          user.user_stat.days_visited.should == 1
         end
 
       end
@@ -722,8 +667,12 @@ describe User do
         let!(:future_date) { 3.days.from_now }
 
         before do
-          DateTime.stubs(:now).returns(future_date)
+          Timecop.freeze(future_date)
           user.update_last_seen!
+        end
+
+        after do
+          Timecop.return
         end
 
         it "should log a second visited_at record when we log an update later" do
@@ -732,14 +681,6 @@ describe User do
       end
 
     end
-  end
-
-  describe '#create_for_email' do
-    let(:subject) { User.create_for_email('test@email.com') }
-    it { should be_present }
-    its(:username) { should == 'test' }
-    its(:name) { should == 'test'}
-    it { should_not be_active }
   end
 
   describe 'email_confirmed?' do
@@ -768,30 +709,56 @@ describe User do
     end
   end
 
-
-  describe 'update_time_read!' do
+  describe "flag_linked_posts_as_spam" do
     let(:user) { Fabricate(:user) }
+    let!(:admin) { Fabricate(:admin) }
+    let!(:post) { PostCreator.new(user, title: "this topic contains spam", raw: "this post has a link: http://discourse.org").create }
+    let!(:another_post) { PostCreator.new(user, title: "this topic also contains spam", raw: "this post has a link: http://discourse.org/asdfa").create }
+    let!(:post_without_link) { PostCreator.new(user, title: "this topic shouldn't be spam", raw: "this post has no links in it.").create }
 
-    it 'makes no changes if nothing is cached' do
-      $redis.expects(:get).with("user-last-seen:#{user.id}").returns(nil)
-      user.update_time_read!
-      user.reload
-      user.time_read.should == 0
+    it "has flagged all the user's posts as spam" do
+      user.flag_linked_posts_as_spam
+
+      post.reload
+      post.spam_count.should == 1
+
+      another_post.reload
+      another_post.spam_count.should == 1
+
+      post_without_link.reload
+      post_without_link.spam_count.should == 0
+
+      # It doesn't raise an exception if called again
+      user.flag_linked_posts_as_spam
+
     end
 
-    it 'makes a change if time read is below threshold' do
-      $redis.expects(:get).with("user-last-seen:#{user.id}").returns(Time.now - 10.0)
-      user.update_time_read!
-      user.reload
-      user.time_read.should == 10
+  end
+
+  describe "bio link stripping" do
+
+    it "returns an empty string with no bio" do
+      expect(Fabricate.build(:user).bio_excerpt).to be_blank
     end
 
-    it 'makes no change if time read is above threshold' do
-      t = Time.now - 1 - User::MAX_TIME_READ_DIFF
-      $redis.expects(:get).with("user-last-seen:#{user.id}").returns(t)
-      user.update_time_read!
-      user.reload
-      user.time_read.should == 0
+    context "with a user that has a link in their bio" do
+      let(:user) { Fabricate.build(:user, bio_raw: "im sissy and i love http://ponycorns.com") }
+
+      before do
+        # Let's cook that bio up good
+        user.send(:cook)
+      end
+
+      it "includes the link if the user is not new" do
+        expect(user.bio_excerpt).to eq("im sissy and i love <a href='http://ponycorns.com' rel='nofollow'>http://ponycorns.com</a>")
+        expect(user.bio_processed).to eq("<p>im sissy and i love <a href=\"http://ponycorns.com\" rel=\"nofollow\">http://ponycorns.com</a></p>")
+      end
+
+      it "removes the link if the user is new" do
+        user.trust_level = TrustLevel.levels[:newuser]
+        expect(user.bio_excerpt).to eq("im sissy and i love http://ponycorns.com")
+        expect(user.bio_processed).to eq("<p>im sissy and i love http://ponycorns.com</p>")
+      end
     end
 
   end
@@ -812,6 +779,110 @@ describe User do
         Fabricate(:user, username: 'foo', name: 'Bar Baz').readable_name.should == 'Bar Baz (foo)'
       end
     end
+  end
+
+  describe '.find_by_username_or_email' do
+    it 'finds users' do
+      bob = Fabricate(:user, username: 'bob', email: 'bob@example.com')
+      found_user = User.find_by_username_or_email('Bob')
+      expect(found_user).to eq bob
+
+      found_user = User.find_by_username_or_email('bob@Example.com')
+      expect(found_user).to eq bob
+
+      found_user = User.find_by_username_or_email('Bob@Example.com')
+      expect(found_user).to be_nil
+
+      found_user = User.find_by_username_or_email('bob1')
+      expect(found_user).to be_nil
+
+      found_user = User.find_by_email('bob@Example.com')
+      expect(found_user).to eq bob
+
+      found_user = User.find_by_email('bob')
+      expect(found_user).to be_nil
+
+      found_user = User.find_by_username('bOb')
+      expect(found_user).to eq bob
+    end
+
+  end
+
+  describe "#added_a_day_ago?" do
+    context "when user is more than a day old" do
+      subject(:user) { Fabricate(:user, created_at: Date.today - 2.days) }
+
+      it "returns false" do
+        expect(user).to_not be_added_a_day_ago
+      end
+    end
+
+    context "is less than a day old" do
+      subject(:user) { Fabricate(:user) }
+
+      it "returns true" do
+        expect(user).to be_added_a_day_ago
+      end
+    end
+  end
+
+  describe "#update_avatar" do
+    let(:upload) { Fabricate(:upload) }
+    let(:user)   { Fabricate(:user) }
+
+    it "should update use's avatar" do
+      expect(user.update_avatar(upload)).to be_true
+    end
+  end
+
+  describe 'api keys' do
+    let(:admin) { Fabricate(:admin) }
+    let(:other_admin) { Fabricate(:admin) }
+    let(:user) { Fabricate(:user) }
+
+    describe '.generate_api_key' do
+
+      it "generates an api key when none exists, and regenerates when it does" do
+        expect(user.api_key).to be_blank
+
+        # Generate a key
+        api_key = user.generate_api_key(admin)
+        expect(api_key.user).to eq(user)
+        expect(api_key.key).to be_present
+        expect(api_key.created_by).to eq(admin)
+
+        user.reload
+        expect(user.api_key).to eq(api_key)
+
+        # Regenerate a key. Keeps the same record, updates the key
+        new_key = user.generate_api_key(other_admin)
+        expect(new_key.id).to eq(api_key.id)
+        expect(new_key.key).to_not eq(api_key.key)
+        expect(new_key.created_by).to eq(other_admin)
+      end
+
+    end
+
+    describe '.revoke_api_key' do
+
+      it "revokes an api key when exists" do
+        expect(user.api_key).to be_blank
+
+        # Revoke nothing does nothing
+        user.revoke_api_key
+        user.reload
+        expect(user.api_key).to be_blank
+
+        # When a key is present it is removed
+        user.generate_api_key(admin)
+        user.reload
+        user.revoke_api_key
+        user.reload
+        expect(user.api_key).to be_blank
+      end
+
+    end
+
   end
 
 end

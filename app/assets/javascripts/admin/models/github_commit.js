@@ -20,23 +20,21 @@ Discourse.GithubCommit = Discourse.Model.extend({
   }.property("sha"),
 
   timeAgo: function() {
-    return Date.create(this.get('commit.committer.date')).relative();
+    return moment(this.get('commit.committer.date')).relativeAge({format: 'medium', leaveAgo: true});
   }.property("commit.committer.date")
 });
 
 Discourse.GithubCommit.reopenClass({
   findAll: function() {
-    var result;
-    result = Em.A();
-    $.ajax( "https://api.github.com/repos/discourse/discourse/commits?callback=callback", {
+    var result = Em.A();
+    Discourse.ajax( "https://api.github.com/repos/discourse/discourse/commits?callback=callback", {
       dataType: 'jsonp',
       type: 'get',
-      data: { per_page: 25 },
-      success: function(response, textStatus, jqXHR) {
-        response.data.each(function(commit) {
-          result.pushObject( Discourse.GithubCommit.create(commit) );
-        });
-      }
+      data: { per_page: 40 }
+    }).then(function (response) {
+      _.each(response.data,function(commit) {
+        result.pushObject( Discourse.GithubCommit.create(commit) );
+      });
     });
     return result;
   }

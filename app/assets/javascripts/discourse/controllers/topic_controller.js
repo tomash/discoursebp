@@ -6,346 +6,393 @@
   @namespace Discourse
   @module Discourse
 **/
-Discourse.TopicController = Discourse.ObjectController.extend({
-  userFilters: new Em.Set(),
+Discourse.TopicController = Discourse.ObjectController.extend(Discourse.SelectedPostsCount, {
   multiSelect: false,
-  bestOf: false,
   summaryCollapsed: true,
-  loading: false,
-  loadingBelow: false,
-  loadingAbove: false,
   needs: ['header', 'modal', 'composer', 'quoteButton'],
+  allPostsSelected: false,
+  editingTopic: false,
+  selectedPosts: null,
+  selectedReplies: null,
 
-  selectedPosts: function() {
-    var posts = this.get('content.posts');
-    if (!posts) return null;
-    return posts.filterProperty('selected');
-  }.property('content.posts.@each.selected'),
+  init: function() {
+    this._super();
+    this.set('selectedPosts', new Em.Set());
+    this.set('selectedReplies', new Em.Set());
+  },
 
-  selectedCount: function() {
-    if (!this.get('selectedPosts')) return 0;
-    return this.get('selectedPosts').length;
-  }.property('selectedPosts'),
+  actions: {
+    jumpTop: function() {
+      Discourse.URL.routeTo(this.get('url'));
+    },
 
-  canMoveSelected: function() {
-    if (!this.get('content.can_move_posts')) return false;
-    // For now, we can move it if we can delete it since the posts need to be deleted.
-    return this.get('canDeleteSelected');
-  }.property('canDeleteSelected'),
+    jumpBottom: function() {
+      Discourse.URL.routeTo(this.get('lastPostUrl'));
+    },
+
+    toggleSummary: function() {
+      this.toggleProperty('summaryCollapsed');
+    },
+
+    selectAll: function() {
+      var posts = this.get('postStream.posts');
+      var selectedPosts = this.get('selectedPosts');
+      if (posts) {
+        selectedPosts.addObjects(posts);
+      }
+      this.set('allPostsSelected', true);
+    },
+
+    deselectAll: function() {
+      this.get('selectedPosts').clear();
+      this.get('selectedReplies').clear();
+      this.set('allPostsSelected', false);
+    },
+
+    /**
+      Toggle a participant for filtering
+
+      @method toggleParticipant
+    **/
+    toggleParticipant: function(user) {
+      this.get('postStream').toggleParticipant(Em.get(user, 'username'));
+    },
+
+    editTopic: function() {
+      if (!this.get('details.can_edit')) return false;
+
+      this.setProperties({
+        editingTopic: true,
+        newTitle: this.get('title'),
+        newCategoryId: this.get('category_id')
+      });
+      return false;
+    },
+
+    // close editing mode
+    cancelEditingTopic: function() {
+      this.set('editingTopic', false);
+    },
+
+    toggleMultiSelect: function() {
+      this.toggleProperty('multiSelect');
+    },
+
+    finishedEditingTopic: function() {
+      var topicController = this;
+      if (this.get('editingTopic')) {
+
+        var topic = this.get('model');
+
+        // Topic title hasn't been sanitized yet, so the template shouldn't trust it.
+        this.set('topicSaving', true);
+
+        // manually update the titles & category
+        topic.setProperties({
+          title: this.get('newTitle'),
+          category_id: parseInt(this.get('newCategoryId'), 10),
+          fancy_title: this.get('newTitle')
+        });
+
+        // save the modifications
+        topic.save().then(function(result){
+          // update the title if it has been changed (cleaned up) server-side
+          var title       = result.basic_topic.title;
+          var fancy_title = result.basic_topic.fancy_title;
+          topic.setProperties({
+            title: title,
+            fancy_title: fancy_title
+          });
+          topicController.set('topicSaving', false);
+        }, function(error) {
+          topicController.set('editingTopic', true);
+          topicController.set('topicSaving', false);
+          if (error && error.responseText) {
+            bootbox.alert($.parseJSON(error.responseText).errors[0]);
+          } else {
+            bootbox.alert(I18n.t('generic_error'));
+          }
+        });
+
+        // close editing mode
+        topicController.set('editingTopic', false);
+      }
+    },
+
+    toggledSelectedPost: function(post) {
+      this.performTogglePost(post);
+    },
+
+    toggledSelectedPostReplies: function(post) {
+      var selectedReplies = this.get('selectedReplies');
+      if (this.performTogglePost(post)) {
+        selectedReplies.addObject(post);
+      } else {
+        selectedReplies.removeObject(post);
+      }
+    },
+
+    deleteSelected: function() {
+      var self = this;
+      bootbox.confirm(I18n.t("post.delete.confirm", { count: this.get('selectedPostsCount')}), function(result) {
+        if (result) {
+
+          // If all posts are selected, it's the same thing as deleting the topic
+          if (self.get('allPostsSelected')) {
+            return self.deleteTopic();
+          }
+
+          var selectedPosts = self.get('selectedPosts'),
+              selectedReplies = self.get('selectedReplies'),
+              postStream = self.get('postStream'),
+              toRemove = new Ember.Set();
+
+
+          Discourse.Post.deleteMany(selectedPosts, selectedReplies);
+          postStream.get('posts').forEach(function (p) {
+            if (self.postSelected(p)) { toRemove.addObject(p); }
+          });
+
+          postStream.removePosts(toRemove);
+          self.send('toggleMultiSelect');
+        }
+      });
+    },
+
+    toggleVisibility: function() {
+      this.get('content').toggleStatus('visible');
+    },
+
+    toggleClosed: function() {
+      this.get('content').toggleStatus('closed');
+    },
+
+    togglePinned: function() {
+      this.get('content').toggleStatus('pinned');
+    },
+
+    toggleArchived: function() {
+      this.get('content').toggleStatus('archived');
+    },
+
+    convertToRegular: function() {
+      this.get('content').convertArchetype('regular');
+    },
+
+    // Toggle the star on the topic
+    toggleStar: function() {
+      this.get('content').toggleStar();
+    },
+
+
+    /**
+      Clears the pin from a topic for the currently logged in user
+
+      @method clearPin
+    **/
+    clearPin: function() {
+      this.get('content').clearPin();
+    },
+
+    resetRead: function() {
+      Discourse.ScreenTrack.current().reset();
+      this.unsubscribe();
+
+      var topicController = this;
+      this.get('model').resetRead().then(function() {
+        topicController.set('message', I18n.t("topic.read_position_reset"));
+        topicController.set('postStream.loaded', false);
+      });
+    },
+
+    replyAsNewTopic: function(post) {
+      var composerController = this.get('controllers.composer');
+      var promise = composerController.open({
+        action: Discourse.Composer.CREATE_TOPIC,
+        draftKey: Discourse.Composer.REPLY_AS_NEW_TOPIC_KEY
+      });
+      var postUrl = "" + location.protocol + "//" + location.host + (post.get('url'));
+      var postLink = "[" + (this.get('title')) + "](" + postUrl + ")";
+
+      promise.then(function() {
+        Discourse.Post.loadQuote(post.get('id')).then(function(q) {
+          composerController.appendText(I18n.t("post.continue_discussion", {
+            postLink: postLink
+          }) + "\n\n" + q);
+        });
+      });
+    }
+  },
+
+  jumpTopDisabled: function() {
+    return (this.get('progressPosition') === 1);
+  }.property('postStream.filteredPostsCount', 'progressPosition'),
+
+  jumpBottomDisabled: function() {
+    return this.get('progressPosition') >= this.get('postStream.filteredPostsCount');
+  }.property('postStream.filteredPostsCount', 'progressPosition'),
+
+  canMergeTopic: function() {
+    if (!this.get('details.can_move_posts')) return false;
+    return (this.get('selectedPostsCount') > 0);
+  }.property('selectedPostsCount'),
+
+  canSplitTopic: function() {
+    if (!this.get('details.can_move_posts')) return false;
+    if (this.get('allPostsSelected')) return false;
+    return (this.get('selectedPostsCount') > 0);
+  }.property('selectedPostsCount'),
+
+  categories: function() {
+    return Discourse.Category.list();
+  }.property(),
+
+  canSelectAll: Em.computed.not('allPostsSelected'),
+
+  canDeselectAll: function () {
+    if (this.get('selectedPostsCount') > 0) return true;
+    if (this.get('allPostsSelected')) return true;
+  }.property('selectedPostsCount', 'allPostsSelected'),
 
   canDeleteSelected: function() {
     var selectedPosts = this.get('selectedPosts');
-    if (!(selectedPosts && selectedPosts.length > 0)) return false;
+
+    if (this.get('allPostsSelected')) return true;
+    if (this.get('selectedPostsCount') === 0) return false;
 
     var canDelete = true;
-    selectedPosts.each(function(p) {
+    selectedPosts.forEach(function(p) {
       if (!p.get('can_delete')) {
         canDelete = false;
         return false;
       }
     });
     return canDelete;
-  }.property('selectedPosts'),
+  }.property('selectedPostsCount'),
+
+  hasError: Ember.computed.or('errorBodyHtml', 'message'),
+
+  streamPercentage: function() {
+    if (!this.get('postStream.loaded')) { return 0; }
+    if (this.get('postStream.filteredPostsCount') === 0) { return 0; }
+    return this.get('progressPosition') / this.get('postStream.filteredPostsCount');
+  }.property('postStream.loaded', 'progressPosition', 'postStream.filteredPostsCount'),
 
   multiSelectChanged: function() {
     // Deselect all posts when multi select is turned off
     if (!this.get('multiSelect')) {
-      var posts = this.get('content.posts');
-      if (posts) {
-        posts.forEach(function(p) {
-          p.set('selected', false);
-        });
-      }
+      this.send('deselectAll');
     }
   }.observes('multiSelect'),
 
   hideProgress: function() {
-    if (!this.get('content.loaded')) return true;
+    if (!this.get('postStream.loaded')) return true;
     if (!this.get('currentPost')) return true;
-    if (this.get('content.filtered_posts_count') < 2) return true;
+    if (this.get('postStream.filteredPostsCount') < 2) return true;
     return false;
-  }.property('content.loaded', 'currentPost', 'content.filtered_posts_count'),
+  }.property('postStream.loaded', 'currentPost', 'postStream.filteredPostsCount'),
 
-  selectPost: function(post) {
-    post.toggleProperty('selected');
+  deselectPost: function(post) {
+    this.get('selectedPosts').removeObject(post);
+
+    var selectedReplies = this.get('selectedReplies');
+    selectedReplies.removeObject(post);
+
+    var selectedReply = selectedReplies.findProperty('post_number', post.get('reply_to_post_number'));
+    if (selectedReply) { selectedReplies.removeObject(selectedReply); }
+
+    this.set('allPostsSelected', false);
   },
 
-  toggleMultiSelect: function() {
-    this.toggleProperty('multiSelect');
+  postSelected: function(post) {
+    if (this.get('allPostsSelected')) { return true; }
+    if (this.get('selectedPosts').contains(post)) { return true; }
+    if (this.get('selectedReplies').findProperty('post_number', post.get('reply_to_post_number'))) { return true; }
+
+    return false;
   },
 
-  toggleSummary: function() {
-    this.toggleProperty('summaryCollapsed');
+  showFavoriteButton: function() {
+    return Discourse.User.current() && !this.get('isPrivateMessage');
+  }.property('isPrivateMessage'),
+
+  recoverTopic: function() {
+    this.get('content').recover();
   },
 
-  moveSelected: function() {
-    var modalController = this.get('controllers.modal');
-    if (!modalController) return;
-
-    modalController.show(Discourse.MoveSelectedView.create({
-      topic: this.get('content'),
-      selectedPosts: this.get('selectedPosts')
-    }));
-  },
-
-  deleteSelected: function() {
-    var topicController = this;
-    return bootbox.confirm(Em.String.i18n("post.delete.confirm", {
-      count: this.get('selectedCount')
-    }), function(result) {
-      if (result) {
-        var selectedPosts = topicController.get('selectedPosts');
-        Discourse.Post.deleteMany(selectedPosts);
-        topicController.get('content.posts').removeObjects(selectedPosts);
-      }
-    });
-  },
-
-  jumpTop: function() {
-    Discourse.URL.routeTo(this.get('content.url'));
-  },
-
-  jumpBottom: function() {
-    Discourse.URL.routeTo(this.get('content.lastPostUrl'));
-  },
-
-  cancelFilter: function() {
-    this.set('bestOf', false);
-    this.get('userFilters').clear();
-  },
-
-  replyAsNewTopic: function(post) {
-    // TODO shut down topic draft cleanly if it exists ...
-    var composerController = this.get('controllers.composer');
-    var promise = composerController.open({
-      action: Discourse.Composer.CREATE_TOPIC,
-      draftKey: Discourse.Composer.REPLY_AS_NEW_TOPIC_KEY
-    });
-    var postUrl = "" + location.protocol + "//" + location.host + (post.get('url'));
-    var postLink = "[" + (this.get('title')) + "](" + postUrl + ")";
-
-    promise.then(function() {
-      Discourse.Post.loadQuote(post.get('id')).then(function(q) {
-        composerController.appendText("" + (Em.String.i18n("post.continue_discussion", {
-          postLink: postLink
-        })) + "\n\n" + q);
-      });
-    });
-  },
-
-  // Topic related
-  reply: function() {
-    this.get('controllers.composer').open({
-      topic: this.get('content'),
-      action: Discourse.Composer.REPLY,
-      draftKey: this.get('content.draft_key'),
-      draftSequence: this.get('content.draft_sequence')
-    });
-  },
-
-  toggleParticipant: function(user) {
-    this.set('bestOf', false);
-    var username = Em.get(user, 'username');
-    var userFilters = this.get('userFilters');
-    if (userFilters.contains(username)) {
-      userFilters.remove(username);
-    } else {
-      userFilters.add(username);
-    }
-  },
-
-  /**
-    Show or hide the bottom bar, depending on our filter options.
-
-    @method updateBottomBar
-  **/
-  updateBottomBar: function() {
-
-    var postFilters = this.get('postFilters');
-
-    if (postFilters.bestOf) {
-      this.set('filterDesc', Em.String.i18n("topic.filters.best_of", {
-        filtered_posts_count: this.get('filtered_posts_count'),
-        posts_count: this.get('posts_count')
-      }));
-    } else if (postFilters.userFilters.length > 0) {
-      this.set('filterDesc', Em.String.i18n("topic.filters.user", {
-        filtered_posts_count: this.get('filtered_posts_count'),
-        count: postFilters.userFilters.length
-      }));
-    } else {
-      // Hide the bottom bar
-      $('#topic-filter').slideUp();
-      return;
-    }
-
-    $('#topic-filter').slideDown();
-  },
-
-  enableBestOf: function(e) {
-    this.set('bestOf', true);
-    this.get('userFilters').clear();
-  },
-
-  postFilters: function() {
-    if (this.get('bestOf') === true) return { bestOf: true };
-    return { userFilters: this.get('userFilters') };
-  }.property('userFilters.[]', 'bestOf'),
-
-  loadPosts: function(opts) {
-    var topicController = this;
-    this.get('content').loadPosts(opts).then(function () {
-      Em.run.next(function () { topicController.updateBottomBar() });
-    });
-  },
-
-  reloadPosts: function() {
-    var topic = this.get('content');
-    if (!topic) return;
-
-    var posts = topic.get('posts');
-    if (!posts) return;
-
-    // Leave the first post -- we keep it above the filter controls
-    posts.removeAt(1, posts.length - 1);
-
-    this.set('loadingBelow', true);
-
-    var topicController = this;
-    var postFilters = this.get('postFilters');
-    return Discourse.Topic.find(this.get('id'), postFilters).then(function(result) {
-      var first = result.posts.first();
-      if (first) {
-        topicController.set('currentPost', first.post_number);
-      }
-      $('#topic-progress .solid').data('progress', false);
-      result.posts.each(function(p) {
-        // Skip the first post
-        if (p.post_number === 1) return;
-        posts.pushObject(Discourse.Post.create(p, topic));
-      });
-
-      Em.run.next(function () { topicController.updateBottomBar(); });
-
-      topicController.set('filtered_posts_count', result.filtered_posts_count);
-      topicController.set('loadingBelow', false);
-      topicController.set('seenBottom', false);
-    });
-  }.observes('postFilters'),
-
-  deleteTopic: function(e) {
-    var topicController = this;
+  deleteTopic: function() {
     this.unsubscribe();
-    this.get('content').destroy().then(function() {
-      topicController.set('message', Em.String.i18n('topic.deleted'));
-      topicController.set('loaded', false);
-    });
-  },
-
-  toggleVisibility: function() {
-    this.get('content').toggleStatus('visible');
-  },
-
-  toggleClosed: function() {
-    this.get('content').toggleStatus('closed');
-  },
-
-  togglePinned: function() {
-    this.get('content').toggleStatus('pinned');
-  },
-
-  toggleArchived: function() {
-    this.get('content').toggleStatus('archived');
-  },
-
-  convertToRegular: function() {
-    this.get('content').convertArchetype('regular');
-  },
-
-  startTracking: function() {
-    var screenTrack = Discourse.ScreenTrack.create({ topic_id: this.get('content.id') });
-    screenTrack.start();
-    this.set('content.screenTrack', screenTrack);
-  },
-
-  stopTracking: function() {
-    var screenTrack = this.get('content.screenTrack');
-    if (screenTrack) screenTrack.stop();
-    this.set('content.screenTrack', null);
-  },
-
-  // Toggle the star on the topic
-  toggleStar: function(e) {
-    this.get('content').toggleStar();
-  },
-
-  /**
-    Clears the pin from a topic for the currentUser
-
-    @method clearPin
-  **/
-  clearPin: function() {
-    this.get('content').clearPin();
+    this.get('content').destroy(Discourse.User.current());
   },
 
   // Receive notifications for this topic
   subscribe: function() {
+
+    // Unsubscribe before subscribing again
+    this.unsubscribe();
+
     var bus = Discourse.MessageBus;
 
-    // there is a condition where the view never calls unsubscribe, navigate to a topic from a topic
-    bus.unsubscribe('/topic/*');
-
     var topicController = this;
-    bus.subscribe("/topic/" + (this.get('content.id')), function(data) {
-      var topic = topicController.get('content');
+    bus.subscribe("/topic/" + (this.get('id')), function(data) {
+      var topic = topicController.get('model');
       if (data.notification_level_change) {
-        topic.set('notification_level', data.notification_level_change);
-        topic.set('notifications_reason_id', data.notifications_reason_id);
-        return;
-      }
-      var posts = topic.get('posts');
-      if (posts.some(function(p) {
-        return p.get('post_number') === data.post_number;
-      })) {
+        topic.set('details.notification_level', data.notification_level_change);
+        topic.set('details.notifications_reason_id', data.notifications_reason_id);
         return;
       }
 
-      topic.set('posts_count', topic.get('posts_count') + 1);
-      topic.set('highest_post_number', data.post_number);
-      topic.set('last_poster', data.user);
-      topic.set('last_posted_at', data.created_at);
-      Discourse.notifyTitle();
+      // Add the new post into the stream
+      topicController.get('postStream').triggerNewPostInStream(data.id);
     });
   },
 
   unsubscribe: function() {
     var topicId = this.get('content.id');
     if (!topicId) return;
-    Discourse.MessageBus.unsubscribe("/topic/" + topicId);
+
+    // there is a condition where the view never calls unsubscribe, navigate to a topic from a topic
+    Discourse.MessageBus.unsubscribe('/topic/*');
   },
 
   // Post related methods
   replyToPost: function(post) {
     var composerController = this.get('controllers.composer');
     var quoteController = this.get('controllers.quoteButton');
-    var quotedText = Discourse.BBCode.buildQuoteBBCode(quoteController.get('post'), quoteController.get('buffer'));
+    var quotedText = Discourse.Quote.build(quoteController.get('post'), quoteController.get('buffer'));
+
+    var topic = post ? post.get('topic') : this.get('model');
+
     quoteController.set('buffer', '');
 
-    if (composerController.get('content.topic.id') === post.get('topic.id') &&
+    if (composerController.get('content.topic.id') === topic.get('id') &&
         composerController.get('content.action') === Discourse.Composer.REPLY) {
       composerController.set('content.post', post);
       composerController.set('content.composeState', Discourse.Composer.OPEN);
       composerController.appendText(quotedText);
     } else {
-      var promise = composerController.open({
-        post: post,
+
+      var opts = {
         action: Discourse.Composer.REPLY,
-        draftKey: post.get('topic.draft_key'),
-        draftSequence: post.get('topic.draft_sequence')
-      });
+        draftKey: topic.get('draft_key'),
+        draftSequence: topic.get('draft_sequence')
+      };
+
+      if(post && post.get("post_number") !== 1){
+        opts.post = post;
+      } else {
+        opts.topic = topic;
+      }
+
+      var promise = composerController.open(opts);
       promise.then(function() { composerController.appendText(quotedText); });
     }
     return false;
+  },
+
+  // Topic related
+  reply: function() {
+    this.replyToPost();
   },
 
   // Edits a post
@@ -359,8 +406,8 @@ Discourse.TopicController = Discourse.ObjectController.extend({
   },
 
   toggleBookmark: function(post) {
-    if (!Discourse.get('currentUser')) {
-      alert(Em.String.i18n("bookmarks.not_bookmarked"));
+    if (!Discourse.User.current()) {
+      alert(I18n.t("bookmarks.not_bookmarked"));
       return;
     }
     post.toggleProperty('bookmarked');
@@ -376,69 +423,72 @@ Discourse.TopicController = Discourse.ObjectController.extend({
     actionType.loadUsers();
   },
 
-  showPrivateInviteModal: function() {
-    var modal = Discourse.InvitePrivateModalView.create({
-      topic: this.get('content')
-    });
-
-    var modalController = this.get('controllers.modal');
-    if (modalController) {
-      modalController.show(modal);
-    }
-  },
-
-  showInviteModal: function() {
-    var modalController = this.get('controllers.modal');
-    if (modalController) {
-      modalController.show(Discourse.InviteModalView.create({
-        topic: this.get('content')
-      }));
-    }
-  },
-
-  // Clicked the flag button
-  showFlags: function(post) {
-    var modalController = this.get('controllers.modal');
-    if (modalController) {
-      modalController.show(Discourse.FlagView.create({
-        post: post,
-        controller: this
-      }));
-    }
-  },
-
-  showHistory: function(post) {
-    var modalController = this.get('controllers.modal');
-    if (modalController) {
-      modalController.show(Discourse.HistoryView.create({
-        originalPost: post
-      }));
-    }
-  },
-
   recoverPost: function(post) {
-    post.set('deleted_at', null);
     post.recover();
   },
 
   deletePost: function(post) {
-    // Moderators can delete posts. Regular users can only create a deleted at message.
-    if (Discourse.get('currentUser.moderator')) {
-      post.set('deleted_at', new Date());
+    var user = Discourse.User.current(),
+        replyCount = post.get('reply_count'),
+        self = this;
+
+    // If the user is staff and the post has replies, ask if they want to delete replies too.
+    if (user.get('staff') && replyCount > 0) {
+      bootbox.dialog(I18n.t("post.controls.delete_replies.confirm", {count: replyCount}), [
+        {label: I18n.t("cancel"),
+         'class': 'btn-danger rightg'},
+        {label: I18n.t("post.controls.delete_replies.no_value"),
+          callback: function() {
+            post.destroy(user);
+          }
+        },
+        {label: I18n.t("post.controls.delete_replies.yes_value"),
+         'class': 'btn-primary',
+          callback: function() {
+            Discourse.Post.deleteMany([post], [post]);
+            self.get('postStream.posts').forEach(function (p) {
+              if (p === post || p.get('reply_to_post_number') === post.get('post_number')) {
+                p.setDeletedState(user);
+              }
+            });
+          }
+        }
+      ]);
     } else {
-      post.set('cooked', Discourse.Markdown.cook(Em.String.i18n("post.deleted_by_author")));
-      post.set('can_delete', false);
-      post.set('version', post.get('version') + 1);
+      post.destroy(user);
     }
-    post.destroy();
   },
 
-  postRendered: function(post) {
-    var onPostRendered = this.get('onPostRendered');
-    if (onPostRendered) {
-      onPostRendered(post);
+  performTogglePost: function(post) {
+    var selectedPosts = this.get('selectedPosts');
+    if (this.postSelected(post)) {
+      this.deselectPost(post);
+      return false;
+    } else {
+      selectedPosts.addObject(post);
+
+      // If the user manually selects all posts, all posts are selected
+      if (selectedPosts.length === this.get('posts_count')) {
+        this.set('allPostsSelected', true);
+      }
+      return true;
     }
+  },
+
+  removeAllowedUser: function(username) {
+    var self = this;
+    bootbox.dialog(I18n.t("private_message_info.remove_allowed_user", {name: username}), [
+      {label: I18n.t("no_value"),
+       'class': 'btn-danger rightg'},
+      {label: I18n.t("yes_value"),
+       'class': 'btn-primary',
+        callback: function() {
+          self.get('details').removeAllowedUser(username);
+        }
+      }
+    ]);
   }
+
 });
 
 

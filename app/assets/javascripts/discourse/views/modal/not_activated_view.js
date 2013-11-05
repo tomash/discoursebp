@@ -8,11 +8,5 @@
 **/
 Discourse.NotActivatedView = Discourse.ModalBodyView.extend({
   templateName: 'modal/not_activated',
-  title: Em.String.i18n('log_in'),
-  emailSent: false,
-
-  sendActivationEmail: function() {
-    $.get(Discourse.getURL('/users/') + this.get('username') + '/send_activation_email');
-    this.set('emailSent', true);
-  }
+  title: I18n.t('log_in')
 });

@@ -7,15 +7,17 @@ class CurrentUserSerializer < BasicUserSerializer
              :notification_channel_position,
              :site_flagged_posts_count,
              :moderator?,
+             :staff?,
              :reply_count,
              :topic_count,
-             :enable_quoting, 
-             :external_links_in_new_tab
-
-  # we probably want to move this into site, but that json is cached so hanging it off current user seems okish
+             :enable_quoting,
+             :external_links_in_new_tab,
+             :dynamic_favicon,
+             :trust_level,
+             :can_edit
 
   def include_site_flagged_posts_count?
-    object.admin
+    object.staff?
   end
 
   def topic_count
@@ -23,15 +25,15 @@ class CurrentUserSerializer < BasicUserSerializer
   end
 
   def reply_count
-    object.posts.where("post_number > 1").count
-  end
-
-  def moderator?
-    object.moderator?
+    object.user_stat.topic_reply_count
   end
 
   def site_flagged_posts_count
     PostAction.flagged_posts_count
+  end
+
+  def can_edit
+    true
   end
 
 end

@@ -12,41 +12,72 @@ Discourse.ComboboxView = Discourse.View.extend({
   valueAttribute: 'id',
 
   render: function(buffer) {
-    var selected, _ref,
-      _this = this;
+
+    var nameProperty = this.get('nameProperty') || 'name';
 
     // Add none option if required
     if (this.get('none')) {
-      buffer.push("<option value=\"\">" + (Ember.String.i18n(this.get('none'))) + "</option>");
+      buffer.push('<option value="">' + (I18n.t(this.get('none'))) + "</option>");
     }
 
-    selected = (_ref = this.get('value')) ? _ref.toString() : void 0;
+    var selected = this.get('value');
+    if (selected) { selected = selected.toString(); }
+
     if (this.get('content')) {
-      return this.get('content').each(function(o) {
-        var data, selectedText, val, _ref1;
-        val = (_ref1 = o[_this.get('valueAttribute')]) ? _ref1.toString() : void 0;
-        selectedText = val === selected ? "selected" : "";
-        data = "";
-        if (_this.dataAttributes) {
-          _this.dataAttributes.forEach(function(a) {
-            data += "data-" + a + "=\"" + (o.get(a)) + "\" ";
+
+      var comboboxView = this;
+      _.each(this.get('content'),function(o) {
+        var val = o[comboboxView.get('valueAttribute')];
+        if (val) { val = val.toString(); }
+
+        var selectedText = (val === selected) ? "selected" : "";
+
+        var data = "";
+        if (comboboxView.dataAttributes) {
+          comboboxView.dataAttributes.forEach(function(a) {
+            data += "data-" + a + "=\"" + o.get(a) + "\" ";
           });
         }
-        return buffer.push("<option " + selectedText + " value=\"" + val + "\" " + data + ">" + o.name + "</option>");
+        buffer.push("<option " + selectedText + " value=\"" + val + "\" " + data + ">" + Em.get(o, nameProperty) + "</option>");
       });
     }
   },
 
+  valueChanged: function() {
+    var $combo = this.$();
+    var val = this.get('value');
+    if (val !== undefined && val !== null) {
+      $combo.val(val.toString());
+    } else {
+      $combo.val(null);
+    }
+    $combo.trigger("liszt:updated");
+  }.observes('value'),
+
   didInsertElement: function() {
-    var $elem,
-      _this = this;
-    $elem = this.$();
+    var $elem = this.$();
+    var comboboxView = this;
+
     $elem.chosen({ template: this.template, disable_search_threshold: 5 });
-    $elem.change(function(e) {
-      _this.set('value', $(e.target).val());
+    if (this.overrideWidths) {
+      // The Chosen plugin hard-codes the widths in style attrs. :<
+      var $chznContainer = $elem.chosen().next();
+      $chznContainer.removeAttr("style");
+      $chznContainer.find('.chzn-drop').removeAttr("style");
+      $chznContainer.find('.chzn-search input').removeAttr("style");
+    }
+    if (this.classNames && this.classNames.length > 0) {
+      // Apply the classes to Chosen's dropdown div too:
+      _.each(this.classNames,function(c) {
+        $elem.chosen().next().addClass(c);
+      });
+    }
+
+    $elem.chosen().change(function(e) {
+      comboboxView.set('value', $(e.target).val());
     });
   }
 
 });
 
-
+Discourse.View.registerHelper('combobox', Discourse.ComboboxView);

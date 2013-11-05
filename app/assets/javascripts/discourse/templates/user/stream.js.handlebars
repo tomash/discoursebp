@@ -1,50 +1,23 @@
-<div id='user-stream'>
-  {{#collection contentBinding="stream" itemClass="item"}}
-    {{#with view.content}}
-      <div class='clearfix info'>
-        <a href="{{unbound userUrl}}" class='avatar-link'><div class='avatar-wrapper'>{{avatar this imageSize="large" extraClasses="actor" ignoreTitle="true"}}</div></a>
-        <span class='time'>{{date path="created_at" leaveAgo="true"}}</span>
-        <span class="title">
-          <a href="{{unbound postUrl}}">{{unbound title}}</a>
-        </span>
-        {{#unless description}}
-          <span class="type">
-          {{#if isPM}}
-            <i class="icon icon-envelope-alt" title="{{i18n user.stream.private_message}}"></i>
-            {{i18n user.stream.sent_by}}
-          {{else}}
-            {{i18n user.stream.posted_by}}
-          {{/if}}
-          </span>
-        {{/unless}}
-        <a class='name' href="{{unbound userUrl}}">{{personalizedName name usernamePath="username"}}</a>
-        {{#if description}}
-          <span class='type'>{{unbound description}}</span>
-          {{#if isPostAction}}
-            <a class="post-number" href="{{unbound replyUrl}}">
-            {{#if reply_to_post_number}}
-              #{{unbound reply_to_post_number}}
-            {{else}}
-              {{i18n user.stream.the_topic}}
-            {{/if}}
-            </a>
-          {{else}}
-            <span class="name">{{personalizedName view.parentView.parentView.user.name usernamePath="view.parentView.parentView.user.username"}}</span>
-          {{/if}}
-        {{/if}}
-      </div>
-      <p class='excerpt'>
-      {{{unbound excerpt}}}
-      </p>
-      {{#each children}}
-        <div class='child-actions'>
-          <i class="icon {{unbound icon}}"></i>
-        {{#each items}}
+{{#groupedEach model.content}}
+  <div {{bindAttr class=":item hidden deleted moderator_action"}}>
+    <div class='clearfix info'>
+      <a href="{{unbound userUrl}}" class='avatar-link'><div class='avatar-wrapper'>{{avatar this imageSize="large" extraClasses="actor" ignoreTitle="true"}}</div></a>
+      <span class='time'>{{date path="created_at" leaveAgo="true"}}</span>
+      <span class="title">
+        <a href="{{unbound postUrl}}">{{unbound title}}</a>
+      </span>
+      <span class="type">{{unbound descriptionHtml}}</span>
+    </div>
+    <p class='excerpt'>
+    {{{unbound excerpt}}}
+    </p>
+    {{#groupedEach children}}
+      <div class='child-actions'>
+        <i class="icon {{unbound icon}}"></i>
+      {{#groupedEach items}}
         <a href="{{unbound userUrl}}" class='avatar-link'><div class='avatar-wrapper'>{{avatar this imageSize="tiny" extraClasses="actor" ignoreTitle="true"}}</div></a>
-        {{/each}}
-        </div>
-      {{/each}}
-    {{/with}}
-  {{/collection}}
-</div>
-<div id="user-stream-bottom"></div>
+      {{/groupedEach}}
+      </div>
+    {{/groupedEach}}
+  </div>
+{{/groupedEach}}

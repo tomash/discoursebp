@@ -6,46 +6,44 @@
   @namespace Discourse
   @module Discourse
 **/
-Discourse.TopicSummaryView = Ember.ContainerView.extend(Discourse.Presence, {
-  topicBinding: 'controller.content',
+Discourse.TopicSummaryView = Discourse.ContainerView.extend({
   classNameBindings: ['hidden', ':topic-summary'],
-  LINKS_SHOWN: 5,
   allLinksShown: false,
 
-  showAllLinksControls: (function() {
-    if (this.blank('topic.links')) return false;
+  topic: Em.computed.alias('controller.model'),
+
+  showAllLinksControls: function() {
     if (this.get('allLinksShown')) return false;
-    if (this.get('topic.links.length') <= this.LINKS_SHOWN) return false;
+    if ((this.get('topic.details.links.length') || 0) <= Discourse.TopicSummaryView.LINKS_SHOWN) return false;
     return true;
-  }).property('allLinksShown', 'topic.links'),
+  }.property('allLinksShown', 'topic.details.links'),
 
-  infoLinks: (function() {
-    if (this.blank('topic.links')) return [];
+  infoLinks: function() {
+    if (this.blank('topic.details.links')) return [];
 
-    var allLinks = this.get('topic.links');
+    var allLinks = this.get('topic.details.links');
     if (this.get('allLinksShown')) return allLinks;
-    return allLinks.slice(0, this.LINKS_SHOWN);
-  }).property('topic.links', 'allLinksShown'),
+    return allLinks.slice(0, Discourse.TopicSummaryView.LINKS_SHOWN);
+  }.property('topic.details.links', 'allLinksShown'),
 
-  newPostCreated: (function() {
-    this.rerender();
-  }).observes('topic.posts_count'),
+  shouldRerender: Discourse.View.renderIfChanged('topic.posts_count'),
 
-  hidden: (function() {
-    if (this.get('post.post_number') !== 1) return true;
+  hidden: function() {
+    if (!this.get('post.firstPost')) return true;
     if (this.get('controller.content.archetype') === 'private_message') return false;
     if (this.get('controller.content.archetype') !== 'regular') return true;
     return this.get('controller.content.posts_count') < 2;
-  }).property(),
+  }.property(),
 
   init: function() {
     this._super();
     if (this.get('hidden')) return;
-    this.pushObject(Em.View.create({
+
+    this.attachViewWithArgs({
       templateName: 'topic_summary/info',
-      topic: this.get('topic'),
-      summaryView: this
-    }));
+      content: this.get('controller')
+    }, Discourse.GroupedView);
+
     this.trigger('appendSummaryInformation', this);
   },
 
@@ -57,22 +55,26 @@ Discourse.TopicSummaryView = Ember.ContainerView.extend(Discourse.Presence, {
 
     // If we have a best of view
     if (this.get('controller.has_best_of')) {
-      container.pushObject(Em.View.create({
+      container.attachViewWithArgs({
         templateName: 'topic_summary/best_of_toggle',
         tagName: 'section',
-        classNames: ['information']
-      }));
+        classNames: ['information'],
+        content: this.get('controller')
+      }, Discourse.GroupedView);
     }
 
     // If we have a private message
     if (this.get('topic.isPrivateMessage')) {
-      return container.pushObject(Em.View.create({
+      container.attachViewWithArgs({
         templateName: 'topic_summary/private_message',
         tagName: 'section',
-        classNames: ['information']
-      }));
+        classNames: ['information'],
+        content: this.get('controller')
+      }, Discourse.GroupedView);
     }
   }
 });
 
-
+Discourse.TopicSummaryView.reopenClass({
+  LINKS_SHOWN: 5
+});

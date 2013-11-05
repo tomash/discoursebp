@@ -7,17 +7,17 @@
   @module Discourse
 **/
 Discourse.UserInvitedRoute = Discourse.Route.extend({
-
   renderTemplate: function() {
     this.render({ into: 'user', outlet: 'userOutlet' });
   },
 
-  setupController: function(controller) {
-    Discourse.InviteList.findInvitedBy(this.controllerFor('user').get('content')).then(function(invited) {
-      controller.set('content', invited);
-    });
+  model: function() {
+    return Discourse.InviteList.findInvitedBy(this.modelFor('user'));
+  },
+
+  setupController: function(controller, model) {
+    controller.set('model', model);
+    this.controllerFor('user').set('indexStream', false);
   }
 
 });
-
-

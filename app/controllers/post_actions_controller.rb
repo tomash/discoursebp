@@ -4,57 +4,51 @@ class PostActionsController < ApplicationController
 
   before_filter :ensure_logged_in, except: :users
   before_filter :fetch_post_from_params
+  before_filter :fetch_post_action_type_id_from_params
 
   def create
-    id = params[:post_action_type_id].to_i
-    if action = PostActionType.where(id: id).first
-      guardian.ensure_post_can_act!(@post, PostActionType.types[id])
+    guardian.ensure_post_can_act!(@post, PostActionType.types[@post_action_type_id])
 
-      post_action = PostAction.act(current_user, @post, action.id, params[:message])
+    args = {}
+    args[:message] = params[:message] if params[:message].present?
+    args[:take_action] = true if guardian.is_staff? and params[:take_action] == 'true'
 
-      if post_action.blank? || post_action.errors.present?
-        render_json_error(post_action)
-      else
-        # We need to reload or otherwise we are showing the old values on the front end
-        @post.reload
-        post_serializer = PostSerializer.new(@post, scope: guardian, root: false)
-        render_json_dump(post_serializer)
-      end
+    post_action = PostAction.act(current_user, @post, @post_action_type_id, args)
 
+    if post_action.blank? || post_action.errors.present?
+      render_json_error(post_action)
     else
-      raise Discourse::InvalidParameters.new(:post_action_type_id)
+      # We need to reload or otherwise we are showing the old values on the front end
+      @post.reload
+      post_serializer = PostSerializer.new(@post, scope: guardian, root: false)
+      render_json_dump(post_serializer)
     end
   end
 
   def users
-    requires_parameter(:post_action_type_id)
-    post_action_type_id = params[:post_action_type_id].to_i
+    guardian.ensure_can_see_post_actors!(@post.topic, @post_action_type_id)
 
-    guardian.ensure_can_see_post_actors!(@post.topic, post_action_type_id)
+    post_actions = @post.post_actions.where(post_action_type_id: @post_action_type_id).includes(:user)
 
-    users = User.
-              joins(:post_actions).
-              where(["post_actions.post_id = ? and post_actions.post_action_type_id = ? and post_actions.deleted_at IS NULL", @post.id, post_action_type_id]).all
-
-    render_serialized(users, BasicUserSerializer)
+    render_serialized(post_actions.to_a, PostActionUserSerializer)
   end
 
   def destroy
-    requires_parameter(:post_action_type_id)
+    post_action = current_user.post_actions.where(post_id: params[:id].to_i, post_action_type_id: @post_action_type_id, deleted_at: nil).first
 
-    post_action = current_user.post_actions.where(post_id: params[:id].to_i, post_action_type_id: params[:post_action_type_id].to_i, deleted_at: nil).first
     raise Discourse::NotFound if post_action.blank?
+
     guardian.ensure_can_delete!(post_action)
+
     PostAction.remove_act(current_user, @post, post_action.post_action_type_id)
 
     render nothing: true
   end
 
   def clear_flags
-    requires_parameter(:post_action_type_id)
     guardian.ensure_can_clear_flags!(@post)
 
-    PostAction.clear_flags!(@post, current_user.id, params[:post_action_type_id].to_i)
+    PostAction.clear_flags!(@post, current_user.id, @post_action_type_id)
     @post.reload
 
     if @post.is_flagged?
@@ -68,13 +62,18 @@ class PostActionsController < ApplicationController
   private
 
     def fetch_post_from_params
-      requires_parameter(:id)
+      params.require(:id)
       finder = Post.where(id: params[:id])
 
       # Include deleted posts if the user is a moderator (to guardian ?)
-      finder = finder.with_deleted if current_user.moderator?
+      finder = finder.with_deleted if current_user.try(:moderator?)
 
       @post = finder.first
       guardian.ensure_can_see!(@post)
+    end
+
+    def fetch_post_action_type_id_from_params
+      params.require(:post_action_type_id)
+      @post_action_type_id = params[:post_action_type_id].to_i
     end
 end

@@ -3,7 +3,7 @@ require 'rails/all'
 require 'redis-store' # HACK
 
 # Plugin related stuff
-require './lib/discourse_plugin_registry'
+require_relative '../lib/discourse_plugin_registry'
 
 if defined?(Bundler)
   # If you precompile assets before deploying to production, use this line
@@ -18,10 +18,31 @@ module Discourse
     # Application configuration should go into files in config/initializers
     # -- all .rb files in that directory are automatically loaded.
 
+    # HACK!! regression in rubygems / bundler in ruby-head
+    if RUBY_VERSION == "2.1.0"
+      $:.map! do |path|
+        path = File.expand_path(path.sub("../../","../")) if path =~ /fast_xor/ && !File.directory?(File.expand_path(path))
+        path
+      end
+    end
+
     require 'discourse'
+    require 'js_locale_helper'
+
+    # mocha hates us, active_support/testing/mochaing.rb line 2 is requiring the wrong
+    #  require, patched in source, on upgrade remove this
+    if Rails.env.test? || Rails.env.development?
+      require "mocha/version"
+      require "mocha/deprecation"
+      if Mocha::VERSION == "0.13.3" && Rails::VERSION::STRING == "3.2.12"
+        Mocha::Deprecation.mode = :disabled
+      end
+    end
 
     # Custom directories with classes and modules you want to be autoloadable.
-    config.autoload_paths += %W(#{config.root}/app/serializers)
+    config.autoload_paths += Dir["#{config.root}/app/serializers"]
+    config.autoload_paths += Dir["#{config.root}/lib/validators/"]
+    config.autoload_paths += Dir["#{config.root}/app"]
 
     # Only load the plugins named here, in the order given (default is alphabetical).
     # :all can be used as a placeholder for all plugins not explicitly named.
@@ -29,13 +50,15 @@ module Discourse
 
     config.assets.paths += %W(#{config.root}/config/locales)
 
-    config.assets.precompile += [
-      'admin.js', 'admin.css', 'shiny/shiny.css', 'preload_store.js',
-      'jquery.js', 'defer/html-sanitizer-bundle.js'
-    ]
+    config.assets.precompile += ['common.css', 'desktop.css', 'mobile.css', 'admin.js', 'admin.css', 'shiny/shiny.css', 'preload_store.js']
+
+    # Precompile all defer
+    Dir.glob("#{config.root}/app/assets/javascripts/defer/*.js").each do |file|
+      config.assets.precompile << "defer/#{File.basename(file)}"
+    end
 
     # Precompile all available locales
-    Dir.glob("app/assets/javascripts/locales/*.js.erb").each do |file|
+    Dir.glob("#{config.root}/app/assets/javascripts/locales/*.js.erb").each do |file|
       config.assets.precompile << "locales/#{file.match(/([a-z_A-Z]+\.js)\.erb$/)[1]}"
     end
 
@@ -43,7 +66,6 @@ module Discourse
     config.active_record.observers = [
         :user_email_observer,
         :user_action_observer,
-        :message_bus_observer,
         :post_alert_observer,
         :search_observer
     ]
@@ -76,11 +98,16 @@ module Discourse
 
     # per https://www.owasp.org/index.php/Password_Storage_Cheat_Sheet
     config.pbkdf2_iterations = 64000
+    config.pbkdf2_algorithm = "sha256"
 
     # dumping rack lock cause the message bus does not work with it (throw :async, it catches Exception)
     # see: https://github.com/sporkrb/spork/issues/66
     # rake assets:precompile also fails
-    config.threadsafe! unless $PROGRAM_NAME =~ /spork|rake/
+    config.threadsafe! unless rails4? || $PROGRAM_NAME =~ /spork|rake/
+
+    # rack lock is nothing but trouble, get rid of it
+    # for some reason still seeing it in Rails 4
+    config.middleware.delete Rack::Lock
 
     # route all exceptions via our router
     config.exceptions_app = self.routes
@@ -92,12 +119,38 @@ module Discourse
     # Use redis for our cache
     config.cache_store = DiscourseRedis.new_redis_store
 
-    # Test with rack::cache disabled. Nginx does this for us
+    # we configure rack cache on demand in an initializer
+    # our setup does not use rack cache and instead defers to nginx
     config.action_dispatch.rack_cache =  nil
 
-    # So open id logs somewhere sane
-    config.after_initialize do
-      OpenID::Util.logger = Rails.logger
+    # ember stuff only used for asset precompliation, production variant plays up
+    config.ember.variant = :development
+    config.ember.ember_location = "#{Rails.root}/vendor/assets/javascripts/production/ember.js"
+    config.ember.handlebars_location = "#{Rails.root}/vendor/assets/javascripts/handlebars.js"
+
+    # Since we are using strong_parameters, we can disable and remove
+    # attr_accessible.
+    config.active_record.whitelist_attributes = false
+
+
+    require 'plugin'
+    require 'auth'
+    unless Rails.env.test?
+      Discourse.activate_plugins!
     end
+
+    config.after_initialize do
+      # So open id logs somewhere sane
+      OpenID::Util.logger = Rails.logger
+      if plugins = Discourse.plugins
+        plugins.each{|plugin| plugin.notify_after_initialize}
+      end
+    end
+
+    # This is not really required per-se, but we do not want to support
+    # XML params, we see errors in our logs about malformed XML and there
+    # absolutly no spot in our app were we use XML as opposed to JSON endpoints
+    ActionDispatch::ParamsParser::DEFAULT_PARSERS.delete(Mime::XML)
+
   end
 end

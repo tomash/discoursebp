@@ -11,7 +11,7 @@ describe Oneboxer::AppleAppOnebox do
   end
 
   it "generates the expected onebox for Apple app" do
-    @o.onebox.should == expected_apple_app_result
+    @o.onebox.should match_html expected_apple_app_result
   end
 
 private
@@ -20,7 +20,7 @@ private
 <div class='onebox-result'>
     <div class='source'>
       <div class='info'>
-        <a href='https://itunes.apple.com/us/app/minecraft-pocket-edition-lite/id479651754' target="_blank">
+        <a href='https://itunes.apple.com/us/app/minecraft-pocket-edition-lite/id479651754' class="track-link" target="_blank">
           <img class='favicon' src="/assets/favicons/apple.png"> itunes.apple.com
         </a>
       </div>

@@ -11,7 +11,7 @@ describe Oneboxer::AndroidAppStoreOnebox do
   end
 
   it "generates the expected onebox for Android App Store" do
-    @o.onebox.should == expected_android_app_store_result
+    @o.onebox.should match_html expected_android_app_store_result
   end
 
 private
@@ -20,7 +20,7 @@ private
 <div class='onebox-result'>
     <div class='source'>
       <div class='info'>
-        <a href='https://play.google.com/store/apps/details?id=com.moosoft.parrot' target="_blank">
+        <a href='https://play.google.com/store/apps/details?id=com.moosoft.parrot' class="track-link" target="_blank">
           <img class='favicon' src="/assets/favicons/google_play.png"> play.google.com
         </a>
       </div>

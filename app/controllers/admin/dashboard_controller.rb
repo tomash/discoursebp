@@ -1,9 +1,8 @@
 class Admin::DashboardController < Admin::AdminController
-
-  caches_action :index, expires_in: 1.hour
-
   def index
-    render_json_dump(AdminDashboardData.fetch_all)
+    dashboard_data = AdminDashboardData.fetch_cached_stats || Jobs::DashboardStats.new.execute({})
+    dashboard_data.merge!({version_check: DiscourseUpdates.check_version.as_json}) if SiteSetting.version_checks?
+    render json: dashboard_data
   end
 
   def problems

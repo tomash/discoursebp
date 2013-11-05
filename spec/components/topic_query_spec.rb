@@ -3,12 +3,60 @@ require 'topic_view'
 
 describe TopicQuery do
 
-  let!(:user) { Fabricate(:coding_horror) }
+  let(:user) { Fabricate(:coding_horror) }
   let(:creator) { Fabricate(:user) }
   let(:topic_query) { TopicQuery.new(user) }
 
   let(:moderator) { Fabricate(:moderator) }
   let(:admin) { Fabricate(:moderator) }
+
+
+  context 'secure category' do
+    it "filters categories out correctly" do
+      category = Fabricate(:category)
+      group = Fabricate(:group)
+      category.set_permissions(group => :full)
+      category.save
+
+      topic = Fabricate(:topic, category: category)
+      topic = Fabricate(:topic, visible: false)
+
+      TopicQuery.new(nil).list_latest.topics.count.should == 0
+      TopicQuery.new(user).list_latest.topics.count.should == 0
+
+      TopicQuery.top_viewed(10).count.should == 0
+      TopicQuery.recent(10).count.should == 0
+
+      # mods can see every group and hidden topics
+      TopicQuery.new(moderator).list_latest.topics.count.should == 3
+
+      group.add(user)
+      group.save
+
+      TopicQuery.new(user).list_latest.topics.count.should == 2
+
+    end
+
+  end
+
+  context 'category filter' do
+    let(:category) { Fabricate(:category) }
+    let(:diff_category) { Fabricate(:category) }
+
+    it "returns topics in the category when we filter to it" do
+      TopicQuery.new(moderator).list_latest.topics.size.should == 0
+
+      # Filter by slug
+      TopicQuery.new(moderator, category: category.slug).list_latest.topics.size.should == 1
+      TopicQuery.new(moderator, category: "#{category.id}-category").list_latest.topics.size.should == 1
+      TopicQuery.new(moderator, category: diff_category.slug).list_latest.topics.size.should == 1
+      TopicQuery.new(moderator, category: 'made up slug').list_latest.topics.size.should == 0
+    end
+
+
+
+  end
+
 
   context 'a bunch of topics' do
     let!(:regular_topic) { Fabricate(:topic, title: 'this is a regular topic', user: creator, bumped_at: 15.minutes.ago) }
@@ -20,7 +68,7 @@ describe TopicQuery do
 
     context 'list_latest' do
       it "returns the topics in the correct order" do
-        topics.should == [pinned_topic, closed_topic, archived_topic, regular_topic]
+        topics.map(&:title).should == [pinned_topic, closed_topic, archived_topic, regular_topic].map(&:title)
       end
 
       it "includes the invisible topic if you're a moderator" do
@@ -40,7 +88,6 @@ describe TopicQuery do
       it "no longer shows the pinned topic at the top" do
         topics.should == [closed_topic, archived_topic, pinned_topic, regular_topic]
       end
-
     end
 
   end
@@ -50,10 +97,6 @@ describe TopicQuery do
     let(:topic_category) { category.topic }
     let!(:topic_no_cat) { Fabricate(:topic) }
     let!(:topic_in_cat) { Fabricate(:topic, category: category) }
-
-    it "returns the topic without a category when filtering uncategorized" do
-      topic_query.list_uncategorized.topics.should == [topic_no_cat]
-    end
 
     it "returns the topic with a category when filtering by category" do
       topic_query.list_category(category).topics.should == [topic_category, topic_in_cat]
@@ -71,34 +114,11 @@ describe TopicQuery do
     end
   end
 
-  pending 'hot' do
-    let(:cold_category) { Fabricate(:category, name: 'brrrrrr', hotness: 5) }
-    let(:hot_category) { Fabricate(:category, name: 'yeeouch', hotness: 10) }
-
-    let!(:t1) { Fabricate(:topic, category: cold_category)}
-    let!(:t2) { Fabricate(:topic, category: hot_category)}
-    let!(:t3) { Fabricate(:topic, category: hot_category)}
-    let!(:t4) { Fabricate(:topic, category: cold_category)}
-
-    it "returns the hot categories first" do
-      topic_query.list_hot.topics.should == [t3, t2, t4, t1]
-    end
-
-  end
-
   context 'unread / read topics' do
 
     context 'with no data' do
-
-      it "has no read topics" do
-        topic_query.list_unread.topics.should be_blank
-      end
-
       it "has no unread topics" do
         topic_query.list_unread.topics.should be_blank
-      end
-
-      it "has an unread count of 0" do
         topic_query.unread_count.should == 0
       end
     end
@@ -115,9 +135,6 @@ describe TopicQuery do
       context 'list_unread' do
         it 'contains no topics' do
           topic_query.list_unread.topics.should == []
-        end
-
-        it "returns 0 as the unread count" do
           topic_query.unread_count.should == 0
         end
       end
@@ -227,7 +244,7 @@ describe TopicQuery do
     end
 
     context 'created topics' do
-      let!(:created_topic) { Fabricate(:post, user: user).topic }
+      let!(:created_topic) { create_post(user: user).topic }
 
       it "includes the created topic" do
         topics.include?(created_topic).should be_true
@@ -235,8 +252,8 @@ describe TopicQuery do
     end
 
     context "topic you've posted in" do
-      let(:other_users_topic) { Fabricate(:post, user: creator).topic }
-      let!(:your_post) { Fabricate(:post, user: user, topic: other_users_topic )}
+      let(:other_users_topic) { create_post(user: creator).topic }
+      let!(:your_post) { create_post(user: user, topic: other_users_topic )}
 
       it "includes the posted topic" do
         topics.include?(other_users_topic).should be_true

@@ -1,3 +1,6 @@
+Fabricator(:user_stat) do
+end
+
 Fabricator(:user) do
   name 'Bruce Wayne'
   username { sequence(:username) { |i| "bruce#{i}" } }
@@ -5,6 +8,7 @@ Fabricator(:user) do
   password 'myawesomepassword'
   trust_level TrustLevel.levels[:basic]
   bio_raw "I'm batman!"
+  ip_address { sequence(:ip_address) { |i| "99.232.23.#{i%254}"} }
 end
 
 Fabricator(:coding_horror, from: :user) do
@@ -29,23 +33,32 @@ Fabricator(:walter_white, from: :user) do
 end
 
 Fabricator(:moderator, from: :user) do
-  name 'A. Moderator'
-  username 'moderator'
-  email 'moderator@discourse.org'
+  name { sequence(:name) {|i| "A#{i} Moderator"} }
+  username { sequence(:username) {|i| "moderator#{i}"} }
+  email { sequence(:email) {|i| "moderator#{i}@discourse.org"} }
   moderator true
 end
 
 Fabricator(:admin, from: :user) do
   name 'Anne Admin'
-  username 'anne'
-  email 'anne@discourse.org'
+  username { sequence(:username) {|i| "anne#{i}"} }
+  email { sequence(:email) {|i| "anne#{i}@discourse.org"} }
   admin true
 end
 
-Fabricator(:another_admin, from: :user) do
-  name 'Anne Admin the 2nd'
-  username 'anne2'
-  email 'anne2@discourse.org'
-  admin true
+Fabricator(:newuser, from: :user) do
+  name 'Newbie Newperson'
+  username 'newbie'
+  email 'newbie@new.com'
+  trust_level TrustLevel.levels[:newuser]
 end
 
+Fabricator(:active_user, from: :user) do
+  name 'Luke Skywalker'
+  username { sequence(:username) { |i| "luke#{i}" } }
+  email { sequence(:email) { |i| "luke#{i}@skywalker.com" } }
+  password 'myawesomepassword'
+  trust_level TrustLevel.levels[:basic]
+  active true
+  bio_raw "Don't as me about my dad!"
+end

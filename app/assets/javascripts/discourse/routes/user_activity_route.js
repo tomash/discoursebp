@@ -1,5 +1,5 @@
 /**
-  This route handles shows a user's activity
+  The base route for showing a user's activity
 
   @class UserActivityRoute
   @extends Discourse.Route
@@ -8,16 +8,32 @@
 **/
 Discourse.UserActivityRoute = Discourse.Route.extend({
 
-  renderTemplate: function() {
-    this.render({ into: 'user', outlet: 'userOutlet' });
+  model: function() {
+    return this.modelFor('user');
   },
 
-  setupController: function(controller) {
-    var userController = this.controllerFor('user');
-    userController.set('filter', null);
-    controller.set('content', userController.get('content'));
+  setupController: function(controller, user) {
+
+    this.controllerFor('userActivity').set('model', user);
+    this.controllerFor('user').set('pmView', null);
+
+    // Bring up a draft
+    var composerController = this.controllerFor('composer');
+    controller.set('model', user);
+    if (Discourse.User.current()) {
+      Discourse.Draft.get('new_private_message').then(function(data) {
+        if (data.draft) {
+          composerController.open({
+            draft: data.draft,
+            draftKey: 'new_private_message',
+            ignoreIfChanged: true,
+            draftSequence: data.draft_sequence
+          });
+        }
+      });
+    }
   }
 
 });
 
-
+Discourse.UserPrivateMessagesRoute = Discourse.UserActivityRoute.extend({});

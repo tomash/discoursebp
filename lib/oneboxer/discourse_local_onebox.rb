@@ -17,19 +17,24 @@ module Oneboxer
 
       # Figure out what kind of onebox to show based on the URL
       case route[:controller]
-      when 'users'
-        user = User.where(username_lower: route[:username].downcase).first
-        Guardian.new.ensure_can_see!(user)
+      # when 'users'
+      #   user = User.where(username_lower: route[:username].downcase).first
+      #   return nil unless user
 
-        args.merge! avatar: PrettyText.avatar_img(user.username, 'tiny'), username: user.username
-        args[:bio] = user.bio_cooked if user.bio_cooked.present?
+      #   return @url unless Guardian.new.can_see?(user)
 
-        @template = 'user'
+      #   args.merge! avatar: PrettyText.avatar_img(user.avatar_template, 'tiny'), username: user.username
+      #   args[:bio] = user.bio_cooked if user.bio_cooked.present?
+
+      #   @template = 'user'
       when 'topics'
+
+        linked = "<a href='#{@url}'>#{@url}</a>"
         if route[:post_number].present? && route[:post_number].to_i > 1
           # Post Link
           post = Post.where(topic_id: route[:topic_id], post_number: route[:post_number].to_i).first
-          Guardian.new.ensure_can_see!(post)
+          return linked unless post
+          return linked unless Guardian.new.can_see?(post)
 
           topic = post.topic
           slug = Slug.for(topic.title)
@@ -46,24 +51,28 @@ module Oneboxer
         else
           # Topic Link
           topic = Topic.where(id: route[:topic_id].to_i).includes(:user).first
+          return linked unless topic
+          return linked unless Guardian.new.can_see?(topic)
+
           post = topic.posts.first
-          Guardian.new(nil).ensure_can_see!(topic)
 
           posters = topic.posters_summary.map do |p|
-            {username: p[:user][:username],
-             avatar: PrettyText.avatar_img(p[:user][:username], 'tiny'),
-             description: p[:description],
-             extras: p[:extras]}
+            {
+              username: p[:user].username,
+              avatar: PrettyText.avatar_img(p[:user].avatar_template, 'tiny'),
+              description: p[:description],
+              extras: p[:extras]
+            }
           end
 
           category = topic.category
           if category
-            category = "<a href=\"/category/#{category.name}\" class=\"badge badge-category\" style=\"background-color: ##{category.color}\">#{category.name}</a>"
+            category = "<a href=\"/category/#{category.slug}\" class=\"badge badge-category\" style=\"background-color: ##{category.color}\">#{category.name}</a>"
           end
 
           quote = post.excerpt(SiteSetting.post_onebox_maxlength)
           args.merge! title: topic.title,
-                      avatar: PrettyText.avatar_img(topic.user.username, 'tiny'),
+                      avatar: PrettyText.avatar_img(topic.user.avatar_template, 'tiny'),
                       posts_count: topic.posts_count,
                       last_post: FreedomPatches::Rails4.time_ago_in_words(topic.last_posted_at, false, scope: :'datetime.distance_in_words_verbose'),
                       age: FreedomPatches::Rails4.time_ago_in_words(topic.created_at, false, scope: :'datetime.distance_in_words_verbose'),

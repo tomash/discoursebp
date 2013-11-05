@@ -7,85 +7,97 @@
   @module Discourse
 **/
 Discourse.Topic = Discourse.Model.extend({
-  categoriesBinding: 'Discourse.site.categories',
 
-  fewParticipants: (function() {
-    if (!this.present('participants')) return null;
-    return this.get('participants').slice(0, 3);
-  }).property('participants'),
+  postStream: function() {
+    return Discourse.PostStream.create({topic: this});
+  }.property(),
 
-  canConvertToRegular: (function() {
+  details: function() {
+    return Discourse.TopicDetails.create({topic: this});
+  }.property(),
+
+  invisible: Em.computed.not('visible'),
+  deleted: Em.computed.notEmpty('deleted_at'),
+
+  canConvertToRegular: function() {
     var a = this.get('archetype');
     return a !== 'regular' && a !== 'private_message';
-  }).property('archetype'),
+  }.property('archetype'),
 
   convertArchetype: function(archetype) {
-    var a;
-    a = this.get('archetype');
+    var a = this.get('archetype');
     if (a !== 'regular' && a !== 'private_message') {
       this.set('archetype', 'regular');
-      return $.post(this.get('url'), {
-        _method: 'put',
-        archetype: 'regular'
+      return Discourse.ajax(this.get('url'), {
+        type: 'PUT',
+        data: {archetype: 'regular'}
       });
     }
   },
 
-  category: (function() {
-    if (this.get('categories')) {
-      return this.get('categories').findProperty('name', this.get('categoryName'));
-    }
-  }).property('categoryName', 'categories'),
+  searchContext: function() {
+    return ({ type: 'topic', id: this.get('id') });
+  }.property('id'),
 
-  url: (function() {
+  category: function() {
+    var categoryId = this.get('category_id');
+    if (categoryId) {
+      return Discourse.Category.list().findProperty('id', categoryId);
+    }
+
+    var categoryName = this.get('categoryName');
+    if (categoryName) {
+      return Discourse.Category.list().findProperty('name', categoryName);
+    }
+    return null;
+  }.property('category_id', 'categoryName'),
+
+  shareUrl: function(){
+    var user = Discourse.User.current();
+    return this.get('url') + (user ? '?u=' + user.get('username_lower') : '');
+  }.property('url'),
+
+  url: function() {
     var slug = this.get('slug');
-    if (slug.isBlank()) {
+    if (slug.trim().length === 0) {
       slug = "topic";
     }
     return Discourse.getURL("/t/") + slug + "/" + (this.get('id'));
-  }).property('id', 'slug'),
+  }.property('id', 'slug'),
 
   // Helper to build a Url with a post number
   urlForPostNumber: function(postNumber) {
-    var url;
-    url = this.get('url');
+    var url = this.get('url');
     if (postNumber && (postNumber > 1)) {
       url += "/" + postNumber;
     }
     return url;
   },
 
-  lastReadUrl: (function() {
+  lastReadUrl: function() {
     return this.urlForPostNumber(this.get('last_read_post_number'));
-  }).property('url', 'last_read_post_number'),
+  }.property('url', 'last_read_post_number'),
 
-  lastPostUrl: (function() {
+  lastUnreadUrl: function() {
+    var postNumber = Math.min(this.get('last_read_post_number') + 1, this.get('highest_post_number'));
+    return this.urlForPostNumber(postNumber);
+  }.property('url', 'last_read_post_number', 'highest_post_number'),
+
+  lastPostUrl: function() {
     return this.urlForPostNumber(this.get('highest_post_number'));
-  }).property('url', 'highest_post_number'),
+  }.property('url', 'highest_post_number'),
 
-  // The last post in the topic
-  lastPost: function() {
-    return this.get('posts').last();
-  },
-
-  postsChanged: (function() {
-    var last, posts;
-    posts = this.get('posts');
-    last = posts.last();
-    if (!(last && last.set && !last.lastPost)) return;
-    posts.each(function(p) {
-      if (p.lastPost) return p.set('lastPost', false);
-    });
-    last.set('lastPost', true);
-    return true;
-  }).observes('posts.@each', 'posts'),
+  lastPosterUrl: function() {
+    return Discourse.getURL("/users/") + this.get("last_poster.username");
+  }.property('last_poster'),
 
   // The amount of new posts to display. It might be different than what the server
   // tells us if we are still asynchronously flushing our "recently read" data.
   // So take what the browser has seen into consideration.
-  displayNewPosts: (function() {
-    var delta, highestSeen, result;
-    if (highestSeen = Discourse.get('highestSeenByTopic')[this.get('id')]) {
+  displayNewPosts: function() {
+    var delta, result;
+    var highestSeen = Discourse.Session.currentProp('highestSeenByTopic')[this.get('id')];
+    if (highestSeen) {
       delta = highestSeen - this.get('last_read_post_number');
       if (delta > 0) {
         result = this.get('new_posts') - delta;
@@ -96,10 +108,10 @@ Discourse.Topic = Discourse.Model.extend({
       }
     }
     return this.get('new_posts');
-  }).property('new_posts', 'id'),
+  }.property('new_posts', 'id'),
 
   // The coldmap class for the age of the topic
-  ageCold: (function() {
+  ageCold: function() {
     var createdAt, createdAtDays, daysSinceEpoch, lastPost, nowDays;
     if (!(lastPost = this.get('last_posted_at'))) return;
     if (!(createdAt = this.get('created_at'))) return;
@@ -117,44 +129,51 @@ Discourse.Topic = Discourse.Model.extend({
       if (createdAtDays < nowDays - 14) return 'coldmap-low';
     }
     return null;
-  }).property('age', 'created_at'),
+  }.property('age', 'created_at'),
 
-  archetypeObject: (function() {
-    return Discourse.get('site.archetypes').findProperty('id', this.get('archetype'));
-  }).property('archetype'),
+  viewsHeat: function() {
+    var v = this.get('views');
+    if( v >= Discourse.SiteSettings.topic_views_heat_high )   return 'heatmap-high';
+    if( v >= Discourse.SiteSettings.topic_views_heat_medium ) return 'heatmap-med';
+    if( v >= Discourse.SiteSettings.topic_views_heat_low )    return 'heatmap-low';
+    return null;
+  }.property('views'),
 
-  isPrivateMessage: (function() {
-    return this.get('archetype') === 'private_message';
-  }).property('archetype'),
+  archetypeObject: function() {
+    return Discourse.Site.currentProp('archetypes').findProperty('id', this.get('archetype'));
+  }.property('archetype'),
+  isPrivateMessage: Em.computed.equal('archetype', 'private_message'),
 
   toggleStatus: function(property) {
     this.toggleProperty(property);
-    return $.post("" + (this.get('url')) + "/status", {
-      _method: 'put',
-      status: property,
-      enabled: this.get(property) ? 'true' : 'false'
+    return Discourse.ajax(this.get('url') + "/status", {
+      type: 'PUT',
+      data: {status: property, enabled: this.get(property) ? 'true' : 'false' }
     });
   },
 
-  favoriteTooltipKey: (function() {
+  favoriteTooltipKey: function() {
     return this.get('starred') ? 'favorite.help.unstar' : 'favorite.help.star';
-  }).property('starred'),
+  }.property('starred'),
 
-  favoriteTooltip: (function() {
-    return Em.String.i18n(this.get('favoriteTooltipKey'));
-  }).property('favoriteTooltipKey'),
+  favoriteTooltip: function() {
+    return I18n.t(this.get('favoriteTooltipKey'));
+  }.property('favoriteTooltipKey'),
 
   toggleStar: function() {
     var topic = this;
     topic.toggleProperty('starred');
-    return $.ajax({
+    return Discourse.ajax({
       url: "" + (this.get('url')) + "/star",
       type: 'PUT',
-      data: { starred: topic.get('starred') ? true : false },
-      error: function(error) {
-        topic.toggleProperty('starred');
-        var errors = $.parseJSON(error.responseText).errors;
-        return bootbox.alert(errors[0]);
+      data: { starred: topic.get('starred') ? true : false }
+    }).then(null, function (error) {
+      topic.toggleProperty('starred');
+
+      if (error && error.responseText) {
+        bootbox.alert($.parseJSON(error.responseText).errors);
+      } else {
+        bootbox.alert(I18n.t('generic_error'));
       }
     });
   },
@@ -162,207 +181,108 @@ Discourse.Topic = Discourse.Model.extend({
   // Save any changes we've made to the model
   save: function() {
     // Don't save unless we can
-    if (!this.get('can_edit')) return;
-    return $.post(this.get('url'), {
-      _method: 'put',
-      title: this.get('title'),
-      category: this.get('category.name')
+    if (!this.get('details.can_edit')) return;
+
+    return Discourse.ajax(this.get('url'), {
+      type: 'PUT',
+      data: { title: this.get('title'), category: this.get('category.name') }
     });
   },
 
   // Reset our read data for this topic
-  resetRead: function(callback) {
-    return $.ajax(Discourse.getURL("/t/") + (this.get('id')) + "/timings", {
-      type: 'DELETE',
-      success: function() {
-        return typeof callback === "function" ? callback() : void 0;
-      }
+  resetRead: function() {
+    return Discourse.ajax("/t/" + this.get('id') + "/timings", {
+      type: 'DELETE'
     });
   },
 
   // Invite a user to this topic
   inviteUser: function(user) {
-    return $.ajax({
+    return Discourse.ajax("/t/" + this.get('id') + "/invite", {
       type: 'POST',
-      url: Discourse.getURL("/t/") + (this.get('id')) + "/invite",
-      data: {
-        user: user
-      }
+      data: { user: user }
     });
   },
 
   // Delete this topic
-  destroy: function() {
-    return $.ajax(Discourse.getURL("/t/") + (this.get('id')), { type: 'DELETE' });
+  destroy: function(deleted_by) {
+    this.setProperties({
+      deleted_at: new Date(),
+      deleted_by: deleted_by,
+      'details.can_delete': false,
+      'details.can_recover': true
+    });
+    return Discourse.ajax("/t/" + this.get('id'), { type: 'DELETE' });
   },
 
-  // Load the posts for this topic
-  loadPosts: function(opts) {
+  // Recover this topic if deleted
+  recover: function(deleted_by) {
+    this.setProperties({
+      deleted_at: null,
+      deleted_by: null,
+      'details.can_delete': true,
+      'details.can_recover': false
+    });
+    return Discourse.ajax("/t/" + this.get('id') + "/recover", { type: 'PUT' });
+  },
+
+  // Update our attributes from a JSON result
+  updateFromJson: function(json) {
+    this.get('details').updateFromJson(json.details);
+
+    var keys = Object.keys(json);
+    keys.removeObject('details');
+    keys.removeObject('post_stream');
+
     var topic = this;
-
-    if (!opts) opts = {};
-
-    // Load the first post by default
-    if ((!opts.bestOf) && (!opts.nearPost)) opts.nearPost = 1;
-
-    // If we already have that post in the DOM, jump to it. Return a promise
-    // that's already complete.
-    if (Discourse.TopicView.scrollTo(this.get('id'), opts.nearPost)) {
-      return Ember.Deferred.promise(function(promise) { promise.resolve(); });
-    }
-
-    // If loading the topic succeeded...
-    var afterTopicLoaded = function(result) {
-      var closestPostNumber, lastPost, postDiff;
-
-      // Update the slug if different
-      if (result.slug) topic.set('slug', result.slug);
-
-      // If we want to scroll to a post that doesn't exist, just pop them to the closest
-      // one instead. This is likely happening due to a deleted post.
-      opts.nearPost = parseInt(opts.nearPost, 10);
-      closestPostNumber = 0;
-      postDiff = Number.MAX_VALUE;
-      result.posts.each(function(p) {
-        var diff = Math.abs(p.post_number - opts.nearPost);
-        if (diff < postDiff) {
-          postDiff = diff;
-          closestPostNumber = p.post_number;
-          if (diff === 0) return false;
-        }
-      });
-
-      opts.nearPost = closestPostNumber;
-      if (topic.get('participants')) {
-        topic.get('participants').clear();
-      }
-      if (result.suggested_topics) {
-        topic.set('suggested_topics', Em.A());
-      }
-      topic.mergeAttributes(result, { suggested_topics: Discourse.Topic });
-      topic.set('posts', Em.A());
-      if (opts.trackVisit && result.draft && result.draft.length > 0) {
-        Discourse.openComposer({
-          draft: Discourse.Draft.getLocal(result.draft_key, result.draft),
-          draftKey: result.draft_key,
-          draftSequence: result.draft_sequence,
-          topic: topic,
-          ignoreIfChanged: true
-        });
-      }
-
-      // Okay this is weird, but let's store the length of the next post when there
-      lastPost = null;
-      result.posts.each(function(p) {
-        var post;
-        p.scrollToAfterInsert = opts.nearPost;
-        post = Discourse.Post.create(p);
-        post.set('topic', topic);
-        topic.get('posts').pushObject(post);
-        lastPost = post;
-      });
-      topic.set('loaded', true);
-    }
-
-    var errorLoadingTopic = function(result) {
-      topic.set('errorLoading', true);
-
-      // If the result was 404 the post is not found
-      if (result.status === 404) {
-        topic.set('errorTitle', Em.String.i18n('topic.not_found.title'))
-        topic.set('message', Em.String.i18n('topic.not_found.description'));
-        return;
-      }
-
-      // If the result is 403 it means invalid access
-      if (result.status === 403) {
-        topic.set('errorTitle', Em.String.i18n('topic.invalid_access.title'))
-        topic.set('message', Em.String.i18n('topic.invalid_access.description'));
-        return;
-      }
-
-      // Otherwise supply a generic error message
-      topic.set('errorTitle', Em.String.i18n('topic.server_error.title'))
-      topic.set('message', Em.String.i18n('topic.server_error.description'));
-    }
-
-    // Finally, call our find method
-    return Discourse.Topic.find(this.get('id'), {
-      nearPost: opts.nearPost,
-      bestOf: opts.bestOf,
-      trackVisit: opts.trackVisit
-    }).then(afterTopicLoaded, errorLoadingTopic);
-  },
-
-  notificationReasonText: (function() {
-    var locale_string;
-    locale_string = "topic.notifications.reasons." + this.notification_level;
-    if (typeof this.notifications_reason_id === 'number') {
-      locale_string += "_" + this.notifications_reason_id;
-    }
-    return Em.String.i18n(locale_string, { username: Discourse.currentUser.username.toLowerCase() });
-  }).property('notifications_reason_id'),
-
-  updateNotifications: function(v) {
-    this.set('notification_level', v);
-    this.set('notifications_reason_id', null);
-    return $.ajax({
-      url: Discourse.getURL("/t/") + (this.get('id')) + "/notifications",
-      type: 'POST',
-      data: {
-        notification_level: v
-      }
+    keys.forEach(function (key) {
+      topic.set(key, json[key]);
     });
-  },
 
-  // use to add post to topics protecting from dupes
-  pushPosts: function(newPosts) {
-    var map, posts;
-    map = {};
-    posts = this.get('posts');
-    posts.each(function(p) {
-      map["" + p.post_number] = true;
-    });
-    return newPosts.each(function(p) {
-      if (!map[p.get('post_number')]) {
-        return posts.pushObject(p);
-      }
-    });
   },
 
   /**
-    Clears the pin from a topic for the currentUser
+    Clears the pin from a topic for the currently logged in user
 
     @method clearPin
   **/
   clearPin: function() {
-
     var topic = this;
 
     // Clear the pin optimistically from the object
     topic.set('pinned', false);
 
-    $.ajax(Discourse.getURL("/t/") + this.get('id') + "/clear-pin", {
-      type: 'PUT',
-      error: function() {
-        // On error, put the pin back
-        topic.set('pinned', true);
-      }
+    Discourse.ajax("/t/" + this.get('id') + "/clear-pin", {
+      type: 'PUT'
+    }).then(null, function() {
+      // On error, put the pin back
+      topic.set('pinned', true);
     });
   },
 
   // Is the reply to a post directly below it?
   isReplyDirectlyBelow: function(post) {
-    var postBelow, posts;
-    posts = this.get('posts');
+    var posts = this.get('postStream.posts');
     if (!posts) return;
 
-    postBelow = posts[posts.indexOf(post) + 1];
+    var postBelow = posts[posts.indexOf(post) + 1];
 
     // If the post directly below's reply_to_post_number is our post number, it's
     // considered directly below.
-    return (postBelow ? postBelow.get('reply_to_post_number') : void 0) === post.get('post_number');
-  }
+    return postBelow && postBelow.get('reply_to_post_number') === post.get('post_number');
+  },
+
+  excerptNotEmpty: Em.computed.notEmpty('excerpt'),
+  hasExcerpt: Em.computed.and('pinned', 'excerptNotEmpty'),
+
+  excerptTruncated: function() {
+    var e = this.get('excerpt');
+    return( e && e.substr(e.length - 8,8) === '&hellip;' );
+  }.property('excerpt'),
+
+  readLastPost: Discourse.computed.propertyEqual('last_read_post_number', 'highest_post_number'),
+  canCleanPin: Em.computed.and('pinned', 'readLastPost')
+
 });
 
 Discourse.Topic.reopenClass({
@@ -382,14 +302,12 @@ Discourse.Topic.reopenClass({
     @returns A promise that will resolve to the topics
   **/
   findSimilarTo: function(title, body) {
-    return $.ajax({url: Discourse.getURL("/topics/similar_to"), data: {title: title, raw: body} }).then(function (results) {
-      return results.map(function(topic) { return Discourse.Topic.create(topic) });
+    return Discourse.ajax("/topics/similar_to", { data: {title: title, raw: body} }).then(function (results) {
+      return results.map(function(topic) { return Discourse.Topic.create(topic); });
     });
   },
 
   // Load a topic, but accepts a set of filters
-  //  options:
-  //    onLoad - the callback after the topic is loaded
   find: function(topicId, opts) {
     var data, promise, url;
     url = Discourse.getURL("/t/") + topicId;
@@ -423,39 +341,29 @@ Discourse.Topic.reopenClass({
     }
 
     // Check the preload store. If not, load it via JSON
-    return PreloadStore.getAndRemove("topic_" + topicId, function() {
-      return $.getJSON(url + ".json", data);
-    }).then(function(result) {
-      var first = result.posts.first();
-      if (first && opts && opts.bestOf) {
-        first.bestOfFirst = true;
-      }
-      return result;
-    });
+    return Discourse.ajax(url + ".json", {data: data});
   },
 
-  // Create a topic from posts
-  movePosts: function(topicId, title, postIds) {
-    return $.ajax(Discourse.getURL(Discourse.getURL("/t/")) + topicId + "/move-posts", {
+  mergeTopic: function(topicId, destinationTopicId) {
+    var promise = Discourse.ajax("/t/" + topicId + "/merge-topic", {
       type: 'POST',
-      data: { title: title, post_ids: postIds }
+      data: {destination_topic_id: destinationTopicId}
+    }).then(function (result) {
+      if (result.success) return result;
+      promise.reject();
     });
+    return promise;
   },
 
-  create: function(obj, topicView) {
-    return Object.tap(this._super(obj), function(result) {
-      if (result.participants) {
-        result.participants = result.participants.map(function(u) {
-          return Discourse.User.create(u);
-        });
-        result.fewParticipants = Em.A();
-        return result.participants.each(function(p) {
-          if (result.fewParticipants.length >= 8) return false;
-          result.fewParticipants.pushObject(p);
-          return true;
-        });
-      }
+  movePosts: function(topicId, opts) {
+    var promise = Discourse.ajax("/t/" + topicId + "/move-posts", {
+      type: 'POST',
+      data: opts
+    }).then(function (result) {
+      if (result.success) return result;
+      promise.reject();
     });
+    return promise;
   }
 
 });

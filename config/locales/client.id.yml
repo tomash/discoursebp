@@ -1,9 +1,25 @@
 # encoding: utf-8
 # This file contains content for the client portion of Discourse, sent out
 # to the Javascript app.
+#
+# To validate this YAML file after you change it, please paste it into
+# http://yamllint.com/
+
 
 id:
   js:
+    number:
+      human:
+        storage_units:
+          format: ! '%n %u'
+          units:
+            byte:
+              one: Byte
+              other: Byte
+            gb: GB
+            kb: KB
+            mb: MB
+            tb: TB
     share:
       topic: "Bagikan tautan ke topik ini"
       post: "Bagikan tautan ke muatan ini"
@@ -48,7 +64,6 @@ id:
       "6": "Jawaban-jawaban"
 
     user:
-      information: "Informasi pengguna"
       profile: "Profil"
       title: "Pengguna"
       mute: "Diamkan"
@@ -166,8 +181,6 @@ id:
         title: "Last IP Address"
       avatar:
         title: "Avatar"
-        instructions: "We use <a href='https://gravatar.com' target='_blank'>Gravatar</a> for avatars based on your email"
-
       filters:
         all: "All"
 
@@ -195,11 +208,11 @@ id:
 
     best_of:
       title: "Best Of"
-      description: "There are <b>{{count}}</b> posts in this topic. That's a lot! Would you like to save time by switching your view to show only the posts with the most interactions and responses?"
+      description: "There are <b>{{count}}</b> posts in this topic. That's a lot! Would you like to save time by showing only the best posts?"
       button: 'Switch to "Best Of" view'
 
     private_message_info:
-      title: "Private Conversation"
+      title: "Private Message"
       invite: "Invite Others..."
 
     email: 'Email'
@@ -290,20 +303,18 @@ id:
       posted: "<i title='replied' class='icon icon-reply'></i> {{username}} {{link}}"
       edited: "<i title='edited' class='icon icon-pencil'></i> {{username}} {{link}}"
       liked: "<i title='liked' class='icon icon-heart'></i> {{username}} {{link}}"
-      private_message: "<i class='icon icon-envelope-alt' title='private message'></i> {{username}} sent you a private message: {{link}}"
-      invited_to_private_message: "{{username}} invited you to a private conversation: {{link}}"
+      private_message: "<i class='icon icon-envelope-alt' title='private message'></i> {{username}} {{link}}"
+      invited_to_private_message: "<i class='icon icon-envelope-alt' title='private message'></i> {{username}} {{link}}"
       invitee_accepted: "<i title='accepted your invitation' class='icon icon-signin'></i> {{username}} accepted your invitation"
       moved_post: "<i title='moved post' class='icon icon-arrow-right'></i> {{username}} moved post to {{link}}"
 
-    image_selector:
+    upload_selector:
       title: "Insert Image"
       from_my_computer: "From My Device"
       from_the_web: "From The Web"
-      add_image: "Add Image"
       remote_tip: "enter address of an image in the form http://example.com/image.jpg"
       local_tip: "click to select an image from your device."
-      upload: "Upload"
-      uploading_image: "Uploading image"
+      uploading: "Uploading image"
 
     search:
       title: "search for topics, posts, users, or categories"
@@ -338,10 +349,9 @@ id:
         category: "There are no more {{category}} topics."
 
     topic:
-      create_in: 'Create {{categoryName}} Topic'
       create: 'Create Topic'
       create_long: 'Create a new Topic'
-      private_message: 'Start a private conversation'
+      private_message: 'Start a private message'
       list: 'Topics'
       new: 'new topic'
       title: 'Topic'
@@ -419,7 +429,7 @@ id:
         invisible: "Make Invisible"
         visible: "Make Visible"
         reset_read: "Reset Read Data"
-        multi_select: "Toggle Multi-Select"
+        multi_select: "Select Posts to Move"
         convert_to_topic: "Convert to Regular Topic"
 
       reply:
@@ -433,17 +443,18 @@ id:
       inviting: "Inviting..."
 
       invite_private:
-        title: 'Invite to Private Conversation'
+        title: 'Invite to Private Message'
         email_or_username: "Invitee's Email or Username"
         email_or_username_placeholder: "email address or username"
         action: "Invite"
-        success: "Thanks! We've invited that user to participate in this private conversation."
+        success: "Thanks! We've invited that user to participate in this private message."
         error: "Sorry there was an error inviting that user."
 
       invite_reply:
         title: 'Invite Friends to Reply'
+        action: 'Email Invite'
         help: 'send invitations to friends so they can reply to this topic with a single click'
-        email: "We'll send your friend a brief email allowing them to reply to this topic by clicking a link."
+        email: "We'll send your friend a brief email allowing them to immediately reply to this topic by clicking a link, no login required."
         email_placeholder: 'email address'
         success: "Thanks! We mailed out an invitation to <b>{{email}}</b>. We'll let you know when they redeem your invitation. Check the invitations tab on your user page to keep track of who you've invited."
         error: "Sorry we couldn't invite that person. Perhaps they are already a user?"
@@ -457,7 +468,7 @@ id:
 
       move_selected:
         title: "Move Selected Posts"
-        topic_name: "New Topic Name:"
+        topic_name: "New Topic Name"
         error: "Sorry, there was an error moving those posts."
         instructions:
           one: "You are about to create a new topic and populate it with the post you've selected."
@@ -501,11 +512,10 @@ id:
         reply: "begin composing a reply to this post"
         like: "like this post"
         edit: "edit this post"
-        flag: "flag this post for moderator attention"
+        flag: "flag this post or send a notification about this post"
         delete: "delete this post"
         undelete: "undelete this post"
         share: "share a link to this post"
-        bookmark: "bookmark this post to your user page"
         more: "More"
 
       actions:
@@ -549,8 +559,8 @@ id:
       color_placeholder: "Any web color"
       delete_confirm: "Are you sure you want to delete that category?"
       list: "List Categories"
-      no_description: "There is no description for this category."
-      change_in_category_topic: "visit category topic to edit the description"
+      no_description: "There is no description for this category, edit the topic definition."
+      change_in_category_topic: "Edit Description"
 
     flagging:
       title: 'Why are you flagging this post?'
@@ -599,7 +609,7 @@ id:
         help: "topics you marked as favorites"
       read:
         title: "Read"
-        help: "topics you've read"
+        help: "topics you've read, in the order that you last read them"
       categories:
         title: "Categories"
         title_in: "Category - {{categoryName}}"
@@ -634,14 +644,13 @@ id:
       title: 'Discourse Admin'
 
       dashboard:
-        title: "Admin Dashboard"
+        title: "Dashboard"
         version: "Installed version"
         up_to_date: "You are running the latest version of Discourse."
         critical_available: "A critical update is available."
         updates_available: "Updates are available."
         please_upgrade: "Please upgrade!"
         latest_version: "Latest version"
-        update_often: 'Please update often!'
 
       flags:
         title: "Flags"
@@ -653,11 +662,31 @@ id:
         delete_title: "delete post (if its the first post delete topic)"
         flagged_by: "Flagged by"
 
+      groups:
+        title: "Groups"
+        edit: "Edit Groups"
+        selector_placeholder: "add users"
+        name_placeholder: "Group name, no spaces, same as username rule"
+        about: "Edit your group membership and names here"
+        can_not_edit_automatic: "Automatic group membership is determined automatically, administer users to assign roles and trust levels"
+        delete: "Delete"
+        delete_confirm: "Delete this group?"
+        delete_failed: "Unable to delete group. If this is an automatic group, it cannot be destroyed."
+
+      api:
+        title: "API"
+        long_title: "API Information"
+        key: "Key"
+        generate: "Generate API Key"
+        regenerate: "Regenerate API Key"
+        info_html: "Your API key will allow you to create and update topics using JSON calls."
+        note_html: "Keep this key <strong>secret</strong>, all users that have it may create arbitrary posts on the forum as any user."
+
       customize:
         title: "Customize"
         header: "Header"
         css: "Stylesheet"
-        override_default: "Override default?"
+        override_default: "Do not include standard style sheet"
         enabled: "Enabled?"
         preview: "preview"
         undo_preview: "undo preview"
@@ -665,8 +694,8 @@ id:
         delete: "Delete"
         delete_confirm: "Delete this customization?"
 
-      email_logs:
-        title: "Email Logs"
+      email:
+        title: "Email"
         sent_at: "Sent At"
         email_type: "Email Type"
         to_address: "To Address"
@@ -686,9 +715,11 @@ id:
         create: 'Add Admin User'
         last_emailed: "Last Emailed"
         not_found: "Sorry that username doesn't exist in our system."
-        new: "New"
         active: "Active"
-        pending: "Pending"
+        nav:
+          new: "New"
+          active: "Active"
+          pending: "Pending"
         approved: "Approved?"
         approved_selected:
           one: "approve user"
@@ -712,12 +743,11 @@ id:
         grant_admin: 'Grant Admin'
         revoke_moderation: 'Revoke Moderation'
         grant_moderation: 'Grant Moderation'
-        basics: Basics
         reputation: Reputation
         permissions: Permissions
         activity: Activity
         like_count: Likes Received
-        private_topics_count: Private Topics Count
+        private_topics_count: Private Topics
         posts_read_count: Posts Read
         post_count: Posts Created
         topics_entered: Topics Entered
@@ -729,5 +759,5 @@ id:
 
       site_settings:
         show_overriden: 'Only show overridden'
-        title: 'Site Settings'
+        title: 'Settings'
         reset: 'reset to default'

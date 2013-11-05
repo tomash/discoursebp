@@ -7,12 +7,10 @@ class Draft < ActiveRecord::Base
     d = find_draft(user,key)
     if d
       return if d.sequence > sequence
-      d.data = data
-      d.sequence = sequence
+      d.update_columns(data: data, sequence: sequence)
     else
-      d = Draft.new(user_id: user.id, draft_key: key, data: data, sequence: sequence)
+      Draft.create!(user_id: user.id, draft_key: key, data: data, sequence: sequence)
     end
-    d.save!
   end
 
   def self.get(user, key, sequence)
@@ -37,3 +35,21 @@ class Draft < ActiveRecord::Base
     Draft.where(user_id: user_id, draft_key: key).first
   end
 end
+
+# == Schema Information
+#
+# Table name: drafts
+#
+#  id         :integer          not null, primary key
+#  user_id    :integer          not null
+#  draft_key  :string(255)      not null
+#  data       :text             not null
+#  created_at :datetime         not null
+#  updated_at :datetime         not null
+#  sequence   :integer          default(0), not null
+#
+# Indexes
+#
+#  index_drafts_on_user_id_and_draft_key  (user_id,draft_key)
+#
+

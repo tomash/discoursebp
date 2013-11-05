@@ -7,14 +7,19 @@
   @module Discourse
 **/
 Discourse.TopicAdminMenuController = Discourse.ObjectController.extend({
-  visible: false,
+  menuVisible: false,
+  needs: ['modal'],
 
-  show: function() {
-    this.set('visible', true);
+  actions: {
+    show: function() {
+      this.set('menuVisible', true);
+    },
+
+    hide: function() {
+      this.set('menuVisible', false);
+    }
   },
 
-  hide: function() {
-    this.set('visible', false);
-  }
+  showRecover: Em.computed.and('deleted', 'details.can_recover')
 
 });

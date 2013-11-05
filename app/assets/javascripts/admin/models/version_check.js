@@ -7,9 +7,24 @@
   @module Discourse
 **/
 Discourse.VersionCheck = Discourse.Model.extend({
+
+  noCheckPerformed: function() {
+    return this.get('updated_at') === null;
+  }.property('updated_at'),
+
+  dataIsOld: function() {
+    return this.get('version_check_pending') || moment().diff(moment(this.get('updated_at')), 'hours') >= 48;
+  }.property('updated_at'),
+
+  staleData: function() {
+    return ( this.get('dataIsOld') ||
+             (this.get('installed_version') !== this.get('latest_version') && this.get('missing_versions_count') === 0) ||
+             (this.get('installed_version') === this.get('latest_version') && this.get('missing_versions_count') !== 0) );
+  }.property('dataIsOld', 'missing_versions_count', 'installed_version', 'latest_version'),
+
   upToDate: function() {
-    return this.get('latest_version') === this.get('installed_version');
-  }.property('latest_version', 'installed_version'),
+    return this.get('missing_versions_count') === 0 || this.get('missing_versions_count') === null;
+  }.property('missing_versions_count'),
 
   behindByOneVersion: function() {
     return this.get('missing_versions_count') === 1;
@@ -26,7 +41,7 @@ Discourse.VersionCheck = Discourse.Model.extend({
 
 Discourse.VersionCheck.reopenClass({
   find: function() {
-    return $.ajax({ url: Discourse.getURL('/admin/version_check'), dataType: 'json' }).then(function(json) {
+    return Discourse.ajax('/admin/version_check').then(function(json) {
       return Discourse.VersionCheck.create(json);
     });
   }

@@ -9,6 +9,8 @@ describe Invite do
   it { should validate_presence_of :email }
   it { should validate_presence_of :invited_by_id }
 
+  let(:iceking) { 'iceking@adventuretime.ooo' }
+
   context 'user validators' do
     let(:coding_horror) { Fabricate(:coding_horror) }
     let(:user) { Fabricate(:user) }
@@ -32,10 +34,9 @@ describe Invite do
       its(:email_already_exists) { should be_false }
 
       it 'should store a lower case version of the email' do
-        subject.email.should == "iceking@adventuretime.ooo"
+        subject.email.should == iceking
       end
     end
-
 
     context 'to a topic' do
       let!(:topic) { Fabricate(:topic) }
@@ -44,22 +45,22 @@ describe Invite do
       context 'email' do
         it 'enqueues a job to email the invite' do
           Jobs.expects(:enqueue).with(:invite_email, has_key(:invite_id))
-          topic.invite_by_email(inviter, 'iceking@adventuretime.ooo')
+          topic.invite_by_email(inviter, iceking)
         end
       end
 
       context 'destroyed' do
         it "can invite the same user after their invite was destroyed" do
-          invite = topic.invite_by_email(inviter, 'iceking@adventuretime.ooo')
+          invite = topic.invite_by_email(inviter, iceking)
           invite.destroy
-          invite = topic.invite_by_email(inviter, 'iceking@adventuretime.ooo')
+          invite = topic.invite_by_email(inviter, iceking)
           invite.should be_present
         end
       end
 
       context 'after created' do
         before do
-          @invite = topic.invite_by_email(inviter, 'iceking@adventuretime.ooo')
+          @invite = topic.invite_by_email(inviter, iceking)
         end
 
         it 'belongs to the topic' do
@@ -77,7 +78,7 @@ describe Invite do
 
         context 'when added by another user' do
           let(:coding_horror) { Fabricate(:coding_horror) }
-          let(:new_invite) { topic.invite_by_email(coding_horror, 'iceking@adventuretime.ooo') }
+          let(:new_invite) { topic.invite_by_email(coding_horror, iceking) }
 
           it 'returns a different invite' do
             new_invite.should_not == @invite
@@ -97,8 +98,12 @@ describe Invite do
             topic.invite_by_email(inviter, 'iceking@adventuretime.ooo').should == @invite
           end
 
-          it 'matches case insensitively' do
-            topic.invite_by_email(inviter, 'ICEKING@adventuretime.ooo').should == @invite
+          it 'matches case insensitively for the domain part' do
+            topic.invite_by_email(inviter, 'iceking@ADVENTURETIME.ooo').should == @invite
+          end
+
+          it 'matches case sensitively for the local part' do
+            topic.invite_by_email(inviter, 'ICEKING@adventuretime.ooo').should_not == @invite
           end
         end
 
@@ -106,7 +111,7 @@ describe Invite do
           let!(:another_topic) { Fabricate(:topic, user: topic.user) }
 
           before do
-            @new_invite = another_topic.invite_by_email(inviter, 'iceking@adventuretime.ooo')
+            @new_invite = another_topic.invite_by_email(inviter, iceking)
           end
 
           it 'should be the same invite' do
@@ -167,19 +172,22 @@ describe Invite do
 
     end
 
+    context 'inviting when must_approve_users? is enabled' do
+      it 'correctly acitvates accounts' do
+        SiteSetting.stubs(:must_approve_users).returns(true)
+        user = invite.redeem
+
+        user.approved?.should == true
+      end
+    end
+
     context 'simple invite' do
 
       let!(:user) { invite.redeem }
 
-      it 'returns a user record' do
+      it 'works correctly' do
         user.is_a?(User).should be_true
-      end
-
-      it 'wants us to send a welcome message' do
         user.send_welcome_message.should be_true
-      end
-
-      it 'has the default_invitee_trust_level' do
         user.trust_level.should == SiteSetting.default_invitee_trust_level
       end
 
@@ -188,28 +196,24 @@ describe Invite do
           invite.reload
         end
 
-        it 'no longer in the pending list for that user' do
+        it 'works correctly' do
+          # no longer in the pending list for that user
           InvitedList.new(invite.invited_by).pending.should be_blank
-        end
 
-        it 'is redeeemed in the invite list for the creator' do
+          # is redeeemed in the invite list for the creator
           InvitedList.new(invite.invited_by).redeemed.should == [invite]
-        end
 
-        it 'has set the user_id attribute' do
+          # has set the user_id attribute
           invite.user.should == user
-        end
 
-        it 'returns true for redeemed' do
+          # returns true for redeemed
           invite.should be_redeemed
         end
+
 
         context 'again' do
           it 'will not redeem twice' do
             invite.redeem.should == user
-          end
-
-          it "doesn't want us to send a welcome message" do
             invite.redeem.send_welcome_message.should be_false
           end
 

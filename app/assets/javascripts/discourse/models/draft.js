@@ -11,9 +11,8 @@ Discourse.Draft = Discourse.Model.extend({});
 Discourse.Draft.reopenClass({
 
   clear: function(key, sequence) {
-    return $.ajax({
+    return Discourse.ajax("/draft.json", {
       type: 'DELETE',
-      url: Discourse.getURL("/draft"),
       data: {
         draft_key: key,
         sequence: sequence
@@ -22,23 +21,21 @@ Discourse.Draft.reopenClass({
   },
 
   get: function(key) {
-    return $.ajax({
-      url: Discourse.getURL('/draft'),
+    return Discourse.ajax('/draft.json', {
       data: { draft_key: key },
       dataType: 'json'
     });
   },
 
   getLocal: function(key, current) {
-    var local;
+    // TODO: implement this
     return current;
   },
 
   save: function(key, sequence, data) {
     data = typeof data === "string" ? data : JSON.stringify(data);
-    return $.ajax({
+    return Discourse.ajax("/draft.json", {
       type: 'POST',
-      url: Discourse.getURL("/draft"),
       data: {
         draft_key: key,
         data: data,

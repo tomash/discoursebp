@@ -1,36 +1,32 @@
-require_dependency 'age_words'
+require_dependency 'pinned_check'
 
 class ListableTopicSerializer < BasicTopicSerializer
 
   attributes :reply_count,
-             :posts_count,
              :highest_post_number,
              :image_url,
              :created_at,
              :last_posted_at,
              :bumped,
              :bumped_at,
-             :bumped_age,
-             :age,
              :unseen,
              :last_read_post_number,
              :unread,
              :new_posts,
-             :title
+             :pinned,
+             :excerpt,
+             :visible,
+             :closed,
+             :archived
 
-  def age
-    AgeWords.age_words(Time.now - (object.created_at || Time.now))
+  has_one :last_poster, serializer: BasicUserSerializer, embed: :objects
+  def include_last_poster?
+    object.include_last_poster
   end
-  
+
   def bumped
     object.created_at < object.bumped_at
   end
-  
-  def bumped_age
-    return nil if object.bumped_at.blank?
-    AgeWords.age_words(Time.now - object.bumped_at)
-  end
-  alias include_bumped_age? :bumped
 
   def seen
     object.user_data.present?
@@ -58,6 +54,19 @@ class ListableTopicSerializer < BasicTopicSerializer
     unread_helper.new_posts
   end
   alias :include_new_posts? :seen
+
+  def include_excerpt?
+    pinned
+  end
+
+  def excerpt
+    # excerpt should be hoisted into topic, this is an N+1 query ... yuck
+    object.posts.by_post_number.first.try(:excerpt, 220, strip_links: true) || nil
+  end
+
+  def pinned
+    PinnedCheck.new(object, object.user_data).pinned?
+  end
 
   protected
 

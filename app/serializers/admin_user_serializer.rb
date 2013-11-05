@@ -3,24 +3,34 @@ class AdminUserSerializer < BasicUserSerializer
   attributes :email,
              :active,
              :admin,
+             :moderator,
              :last_seen_age,
-             :days_visited,
              :last_emailed_age,
              :created_at_age,
              :username_lower,
              :trust_level,
              :flag_level,
              :username,
+             :title,
              :avatar_template,
-             :topics_entered,
-             :posts_read_count,
-             :time_read,
              :can_approve,
              :approved,
              :banned_at,
              :banned_till,
              :is_banned,
-             :ip_address
+             :ip_address,
+             :can_send_activation_email,
+             :can_activate,
+             :can_deactivate,
+             :blocked,
+             :time_read
+
+  [:days_visited,:posts_read_count,:topics_entered].each do |sym|
+    attributes sym
+    define_method sym do
+      object.user_stat.send(sym)
+    end
+  end
 
   def is_banned
     object.is_banned?
@@ -41,8 +51,8 @@ class AdminUserSerializer < BasicUserSerializer
   end
 
   def time_read
-    return nil if object.time_read.blank?
-    AgeWords.age_words(object.time_read)
+    return nil if object.user_stat.time_read.blank?
+    AgeWords.age_words(object.user_stat.time_read)
   end
 
   def created_at_age
@@ -59,6 +69,18 @@ class AdminUserSerializer < BasicUserSerializer
 
   def include_approved?
     SiteSetting.must_approve_users
+  end
+
+  def can_send_activation_email
+    scope.can_send_activation_email?(object)
+  end
+
+  def can_activate
+    scope.can_activate?(object)
+  end
+
+  def can_deactivate
+    scope.can_deactivate?(object)
   end
 
 end

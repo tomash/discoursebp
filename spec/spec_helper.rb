@@ -11,44 +11,35 @@ require 'spork'
 require 'fakeweb'
 FakeWeb.allow_net_connect = false
 
-module Helpers
-  def log_in(fabricator=nil)
-    user = Fabricate(fabricator || :user)
-    log_in_user(user)
-    user
-  end
-
-  def log_in_user(user)
-    session[:current_user_id] = user.id
-  end
-
-  def fixture_file(filename)
-    return '' if filename == ''
-    file_path = File.expand_path(File.dirname(__FILE__) + '/fixtures/' + filename)
-    File.read(file_path)
-  end
-end
-
 Spork.prefork do
   # Loading more in this block will cause your tests to run faster. However,
   # if you change any configuration or code from libraries loaded here, you'll
   # need to restart spork for it take effect.
+  require 'fabrication'
+  require 'mocha/api'
+  require 'fakeweb'
+  require 'certified'
+
   ENV["RAILS_ENV"] ||= 'test'
   require File.expand_path("../../config/environment", __FILE__)
   require 'rspec/rails'
   require 'rspec/autorun'
+  require 'shoulda'
 
   # Requires supporting ruby files with custom matchers and macros, etc,
   # in spec/support/ and its subdirectories.
   Dir[Rails.root.join("spec/support/**/*.rb")].each {|f| require f}
 
-  load "#{Rails.root}/db/seeds.rb"
+  # let's not run seed_fu every test
+  SeedFu.quiet = true if SeedFu.respond_to? :quiet
+  SeedFu.seed
 
   RSpec.configure do |config|
-    
     config.fail_fast = ENV['RSPEC_FAIL_FAST'] == "1"
     config.include Helpers
+    config.include MessageBus
     config.mock_framework = :mocha
+    config.order = 'random'
 
     # If you're not using ActiveRecord, or you'd prefer not to run each of your
     # examples within a transaction, remove the following line or assign false
@@ -60,36 +51,46 @@ Spork.prefork do
     # rspec-rails.
     config.infer_base_class_for_anonymous_controllers = true
 
-    config.before(:suite) do
-      SeedFu.seed
+    # if we need stuff post fork, pre tests run here
+    # config.before(:suite) do
+    # end
+
+    config.before do
+      # disable all observers, enable as needed during specs
+      ActiveRecord::Base.observers.disable :all
+      SiteSetting.provider.all.each do |setting|
+        SiteSetting.remove_override!(setting.name)
+      end
+    end
+
+    class TestCurrentUserProvider < Auth::DefaultCurrentUserProvider
+      def log_on_user(user,session,cookies)
+        session[:current_user_id] = user.id
+        super
+      end
+
+      def log_off_user(session,cookies)
+        session[:current_user_id] = nil
+        super
+      end
     end
 
     config.before(:all) do
       DiscoursePluginRegistry.clear
+      Discourse.current_user_provider = TestCurrentUserProvider
+
+      # a bit odd, but this setting is actually preloaded
+      SiteSetting.defaults[:uncategorized_category_id] = SiteSetting.uncategorized_category_id
+
+      require_dependency 'site_settings/local_process_provider'
+      SiteSetting.provider = SiteSettings::LocalProcessProvider.new
     end
 
   end
 
-  class DateTime
-    class << self
-      alias_method :old_now, :now
-      def now
-        @now || old_now
-      end
-      def now=(v)
-        @now = v
-      end
-    end
-  end
-
-  def freeze_time(d=nil)
-    begin
-      d ||= DateTime.now
-      DateTime.now = d
-      yield
-    ensure
-      DateTime.now = nil
-    end
+  def freeze_time(now=Time.now)
+    DateTime.stubs(:now).returns(DateTime.parse(now.to_s))
+    Time.stubs(:now).returns(Time.parse(now.to_s))
   end
 
 end
@@ -97,8 +98,8 @@ end
 Spork.each_run do
   # This code will be run each time you run your specs.
   $redis.client.reconnect
-  MessageBus.reliable_pub_sub.pub_redis.client.reconnect
   Rails.cache.reconnect
+  MessageBus.after_fork
 end
 
 # --- Instructions ---
@@ -129,5 +130,3 @@ end
 #
 # These instructions should self-destruct in 10 seconds.  If they don't, feel
 # free to delete them.
-
-

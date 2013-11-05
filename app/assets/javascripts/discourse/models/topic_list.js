@@ -9,118 +9,179 @@
 
 Discourse.TopicList = Discourse.Model.extend({
 
-  loadMoreTopics: function() {
-    var moreUrl, _this = this;
+  forEachNew: function(topics, callback) {
+    var topicIds = [];
+    _.each(this.get('topics'),function(topic) {
+      topicIds[topic.get('id')] = true;
+    });
 
-    if (moreUrl = this.get('more_topics_url')) {
-      Discourse.URL.replaceState(Discourse.getURL("/") + (this.get('filter')) + "/more");
-      return $.ajax({url: moreUrl}).then(function (result) {
-        var newTopics, topicIds, topics, topicsAdded = 0;
+    _.each(topics,function(topic) {
+      if(!topicIds[topic.id]) {
+        callback(topic);
+      }
+    });
+  },
+
+  loadMoreTopics: function() {
+
+    if (this.get('loadingMore')) { return Ember.RSVP.reject(); }
+
+    var moreUrl = this.get('more_topics_url');
+    if (moreUrl) {
+
+      var topicList = this;
+      this.set('loadingMore', true);
+
+      return Discourse.ajax({url: moreUrl}).then(function (result) {
+        var topicsAdded = 0;
         if (result) {
           // the new topics loaded from the server
-          newTopics = Discourse.TopicList.topicsFrom(result);
-          // the current topics
-          topics = _this.get('topics');
-          // keeps track of the ids of the current topics
-          topicIds = [];
-          topics.each(function(t) {
-            topicIds[t.get('id')] = true;
+          var newTopics = Discourse.TopicList.topicsFrom(result);
+          var topics = topicList.get("topics");
+
+          topicList.forEachNew(newTopics, function(t) {
+            t.set('highlight', topicsAdded++ === 0);
+            topics.pushObject(t);
           });
-          // add new topics to the list of current topics if not already present
-          newTopics.each(function(t) {
-            if (!topicIds[t.get('id')]) {
-              // highlight the first of the new topics so we can get a visual feedback
-              t.set('highlight', topicsAdded++ === 0);
-              return topics.pushObject(t);
-            }
-          });
-          _this.set('more_topics_url', result.topic_list.more_topics_url);
-          Discourse.set('transient.topicsList', _this);
+
+          topicList.set('more_topics_url', result.topic_list.more_topics_url);
+          Discourse.Session.currentProp('topicList', topicList);
+          topicList.set('loadingMore', false);
+
+          return result.topic_list.more_topics_url;
         }
-        return result.topic_list.more_topics_url;
       });
     } else {
-      return null;
+      // Return a promise indicating no more results
+      return Ember.RSVP.reject();
     }
   },
 
-  insert: function(json) {
-    var newTopic  = Discourse.TopicList.decodeTopic(json);
-    // new Topics are always unseen
-    newTopic.set('unseen', true);
-    // and highlighted on the topics list view
-    newTopic.set('highlight', true);
-    return this.get('inserted').unshiftObject(newTopic);
-  }
 
+  // loads topics with these ids "before" the current topics
+  loadBefore: function(topic_ids){
+    var topicList = this,
+        topics = this.get('topics');
+
+    // refresh dupes
+    topics.removeObjects(topics.filter(function(topic){
+      return topic_ids.indexOf(topic.get('id')) >= 0;
+    }));
+
+    Discourse.TopicList.loadTopics(topic_ids, this.get('filter'))
+      .then(function(newTopics){
+        topicList.forEachNew(newTopics, function(t) {
+          // highlight the first of the new topics so we can get a visual feedback
+          t.set('highlight', true);
+          topics.insertAt(0,t);
+        });
+        Discourse.Session.currentProp('topicList', topicList);
+      });
+  }
 });
 
 Discourse.TopicList.reopenClass({
 
-  decodeTopic: function(result) {
-    var categories, topic, users;
-    categories = this.extractByKey(result.categories, Discourse.Category);
-    users = this.extractByKey(result.users, Discourse.User);
-    topic = result.topic_list_item;
-    topic.category = categories[topic.category];
-    topic.posters.each(function(p) {
-      p.user = users[p.user_id] || users[p.user];
-    });
-    return Discourse.Topic.create(topic);
+  loadTopics: function(topic_ids, filter) {
+    var defer = new Ember.Deferred(),
+        url = Discourse.getURL("/") + filter + "?topic_ids=" + topic_ids.join(",");
+
+    Discourse.ajax({url: url}).then(function (result) {
+      if (result) {
+        // the new topics loaded from the server
+        var newTopics = Discourse.TopicList.topicsFrom(result);
+
+        var topics = _(topic_ids)
+          .map(function(id){
+                  return newTopics.find(function(t){ return t.id === id; });
+                })
+          .compact()
+          .value();
+
+        defer.resolve(topics);
+      } else {
+        defer.reject();
+      }
+    }).then(null, function(){ defer.reject(); });
+
+    return defer;
   },
 
+  /**
+    Stitch together side loaded topic data
+
+    @method topicsFrom
+    @param {Object} JSON object with topic data
+    @returns {Array} the list of topics
+  **/
   topicsFrom: function(result) {
     // Stitch together our side loaded data
-    var categories, topics, users;
-    categories = this.extractByKey(result.categories, Discourse.Category);
-    users = this.extractByKey(result.users, Discourse.User);
-    topics = Em.A();
-    result.topic_list.topics.each(function(ft) {
-      ft.category = categories[ft.category_id];
-      ft.posters.each(function(p) {
+    var categories = Discourse.Category.list(),
+        users = this.extractByKey(result.users, Discourse.User),
+        topics = Em.A();
+
+    return result.topic_list.topics.map(function (t) {
+      t.category = categories.findBy('id', t.category_id);
+      t.posters.forEach(function(p) {
         p.user = users[p.user_id];
       });
-      return topics.pushObject(Discourse.Topic.create(ft));
+      return Discourse.Topic.create(t);
     });
-    return topics;
   },
 
-  list: function(menuItem) {
-    var filter, list, promise, topic_list, url;
-    filter = menuItem.name;
-    topic_list = Discourse.TopicList.create();
-    topic_list.set('inserted', Em.A());
-    topic_list.set('filter', filter);
-    url = Discourse.getURL("/") + filter + ".json";
-    if (menuItem.filters && menuItem.filters.length > 0) {
-      url += "?exclude_category=" + menuItem.filters[0].substring(1);
-    }
-    if (list = Discourse.get('transient.topicsList')) {
-      if ((list.get('filter') === filter) && window.location.pathname.indexOf('more') > 0) {
-        list.set('loaded', true);
-        return Ember.Deferred.promise(function(promise) {
-          promise.resolve(list);
-        });
-      }
-    }
-    Discourse.set('transient.topicsList', null);
-    Discourse.set('transient.topicListScrollPos', null);
+  /**
+    Lists topics on a given menu item
 
-    return PreloadStore.getAndRemove("topic_list", function() { return $.getJSON(url) }).then(function(result) {
-      topic_list.set('topics', Discourse.TopicList.topicsFrom(result));
-      topic_list.set('can_create_topic', result.topic_list.can_create_topic);
-      topic_list.set('more_topics_url', result.topic_list.more_topics_url);
-      topic_list.set('filter_summary', result.topic_list.filter_summary);
-      topic_list.set('draft_key', result.topic_list.draft_key);
-      topic_list.set('draft_sequence', result.topic_list.draft_sequence);
-      topic_list.set('draft', result.topic_list.draft);
-      if (result.topic_list.filtered_category) {
-        topic_list.set('category', Discourse.Category.create(result.topic_list.filtered_category));
-      }
-      topic_list.set('loaded', true);
-      return topic_list;
-    });
+    @method list
+    @param {Object} The menu item to filter to
+    @returns {Promise} a promise that resolves to the list of topics
+  **/
+  list: function(menuItem) {
+    var filter = menuItem.get('name'),
+        session = Discourse.Session.current(),
+        list = session.get('topicList');
+
+    if (list && (list.get('filter') === filter) && window.location.pathname.indexOf('more') > 0) {
+      list.set('loaded', true);
+      return Ember.RSVP.resolve(list);
+    }
+    session.setProperties({topicList: null, topicListScrollPos: null});
+    return Discourse.TopicList.find(filter, menuItem.get('excludeCategory'));
   }
 });
 
+
+Discourse.TopicList.reopenClass({
+
+  find: function(filter, excludeCategory) {
+
+    // How we find our topic list
+    var finder = function() {
+      var url = Discourse.getURL("/") + filter + ".json";
+      if (excludeCategory) { url += "?exclude_category=" + excludeCategory; }
+      return Discourse.ajax(url);
+    };
+
+    return PreloadStore.getAndRemove("topic_list", finder).then(function(result) {
+      var topicList = Discourse.TopicList.create({
+        inserted: Em.A(),
+        filter: filter,
+        topics: Discourse.TopicList.topicsFrom(result),
+        can_create_topic: result.topic_list.can_create_topic,
+        more_topics_url: result.topic_list.more_topics_url,
+        draft_key: result.topic_list.draft_key,
+        draft_sequence: result.topic_list.draft_sequence,
+        draft: result.topic_list.draft,
+        canViewRankDetails: result.topic_list.can_view_rank_details,
+        loaded: true
+      });
+
+      if (result.topic_list.filtered_category) {
+        topicList.set('category', Discourse.Category.create(result.topic_list.filtered_category));
+      }
+      return topicList;
+    });
+  }
+
+});
 

@@ -19,14 +19,10 @@ Discourse.AdminDashboard.reopenClass({
     @return {jqXHR} a jQuery Promise object
   **/
   find: function() {
-    var model = Discourse.AdminDashboard.create();
-    return $.ajax(Discourse.getURL("/admin/dashboard"), {
-      type: 'GET',
-      dataType: 'json',
-      success: function(json) {
-        model.mergeAttributes(json);
-        model.set('loaded', true);
-      }
+    return Discourse.ajax("/admin/dashboard").then(function(json) {
+      var model = Discourse.AdminDashboard.create(json);
+      model.set('loaded', true);
+      return model;
     });
   },
 
@@ -38,14 +34,13 @@ Discourse.AdminDashboard.reopenClass({
     @return {jqXHR} a jQuery Promise object
   **/
   fetchProblems: function() {
-    var model = Discourse.AdminDashboard.create();
-    return $.ajax(Discourse.getURL("/admin/dashboard/problems"), {
+    return Discourse.ajax("/admin/dashboard/problems", {
       type: 'GET',
-      dataType: 'json',
-      success: function(json) {
-        model.mergeAttributes(json);
-        model.set('loaded', true);
-      }
+      dataType: 'json'
+    }).then(function(json) {
+      var model = Discourse.AdminDashboard.create(json);
+      model.set('loaded', true);
+      return model;
     });
   }
 });

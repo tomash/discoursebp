@@ -10,6 +10,8 @@ Discourse.EmailLog = Discourse.Model.extend({});
 
 Discourse.EmailLog.reopenClass({
   create: function(attrs) {
+    attrs = attrs || {};
+
     if (attrs.user) {
       attrs.user = Discourse.AdminUser.create(attrs.user);
     }
@@ -17,16 +19,13 @@ Discourse.EmailLog.reopenClass({
   },
 
   findAll: function(filter) {
-    var result;
-    result = Em.A();
-    $.ajax({
-      url: Discourse.getURL("/admin/email_logs.json"),
-      data: { filter: filter },
-      success: function(logs) {
-        logs.each(function(log) {
-          result.pushObject(Discourse.EmailLog.create(log));
-        });
-      }
+    var result = Em.A();
+    Discourse.ajax("/admin/email/logs.json", {
+      data: { filter: filter }
+    }).then(function(logs) {
+      _.each(logs,function(log) {
+        result.pushObject(Discourse.EmailLog.create(log));
+      });
     });
     return result;
   }

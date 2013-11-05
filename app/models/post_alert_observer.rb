@@ -15,6 +15,8 @@ class PostAlertObserver < ActiveRecord::Observer
 
   # We need to consider new people to mention / quote when a post is edited
   def after_save_post(post)
+    return if post.topic.private_message?
+
     mentioned_users = extract_mentioned_users(post)
     quoted_users = extract_quoted_users(post)
 
@@ -58,11 +60,11 @@ class PostAlertObserver < ActiveRecord::Observer
   def after_create_post(post)
     if post.topic.private_message?
       # If it's a private message, notify the topic_allowed_users
-      post.topic.topic_allowed_users.reject{ |a| a.user_id == post.user_id }.each do |a|
-        create_notification(a.user, Notification.types[:private_message], post)
+      post.topic.all_allowed_users.reject{ |a| a.id == post.user_id }.each do |a|
+        create_notification(a, Notification.types[:private_message], post)
       end
-    else
-      # If it's not a private message, notify the users
+    elsif post.post_type != Post.types[:moderator_action]
+      # If it's not a private message and it's not an automatic post caused by a moderator action, notify the users
       notify_post_users(post)
     end
   end
@@ -94,20 +96,18 @@ class PostAlertObserver < ActiveRecord::Observer
                                         display_username: opts[:display_username] || post.user.username }.to_json)
     end
 
+    # TODO: Move to post-analyzer?
     # Returns a list users who have been mentioned
     def extract_mentioned_users(post)
       User.where(username_lower: post.raw_mentions).where("id <> ?", post.user_id)
     end
 
+    # TODO: Move to post-analyzer?
     # Returns a list of users who were quoted in the post
     def extract_quoted_users(post)
-      result = []
-      post.raw.scan(/\[quote=\"([^,]+),.+\"\]/).uniq.each do |m|
-        username = m.first.strip.downcase
-        user = User.where("username_lower = :username and id != :id", username: username, id: post.user_id).first
-        result << user if user.present?
-      end
-      result
+      post.raw.scan(/\[quote=\"([^,]+),.+\"\]/).uniq.map do |m|
+        User.where("username_lower = :username and id != :id", username: m.first.strip.downcase, id: post.user_id).first
+      end.compact
     end
 
     # Notify a bunch of users

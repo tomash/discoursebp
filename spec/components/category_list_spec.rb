@@ -4,40 +4,24 @@ require 'category_list'
 describe CategoryList do
 
   let(:user) { Fabricate(:user) }
-  let(:category_list) { CategoryList.new(user) }
+  let(:category_list) { CategoryList.new(Guardian.new user) }
 
-  context "with no categories" do
+  context "security" do
+    it "properly hide secure categories" do
+      admin = Fabricate(:admin)
+      user = Fabricate(:user)
 
-    it "has no categories" do
-      category_list.categories.should be_blank
+      cat = Fabricate(:category)
+      topic = Fabricate(:topic, category: cat)
+      cat.set_permissions(:admins => :full)
+      cat.save
+
+      # uncategorized + this
+      CategoryList.new(Guardian.new admin).categories.count.should == 2
+
+      CategoryList.new(Guardian.new user).categories.count.should == 0
+      CategoryList.new(Guardian.new nil).categories.count.should == 0
     end
-
-    context "with an uncateorized topic" do
-      let!(:topic) { Fabricate(:topic)}
-      let(:category) { category_list.categories.first }
-
-      it "has a category" do
-        category.should be_present
-      end
-
-      it "has the uncategorized label" do
-        category.name.should == SiteSetting.uncategorized_name
-      end
-
-      it "has the uncategorized slug" do
-        category.slug.should == SiteSetting.uncategorized_name
-      end
-
-      it "has one topic this week" do
-        category.topics_week.should == 1
-      end
-
-      it "contains the topic in featured_topics" do
-        category.featured_topics.should == [topic]
-      end
-
-    end
-
   end
 
   context "with a category" do
@@ -52,12 +36,23 @@ describe CategoryList do
 
       it "returns empty categories for those who can create them" do
         Guardian.any_instance.expects(:can_create?).with(Category).returns(true)
-        category_list.categories.should be_present
+        category_list.categories.should_not be_blank
       end
 
+      it "returns empty categories with descriptions" do
+        Fabricate(:category, description: 'The category description.')
+        Guardian.any_instance.expects(:can_create?).with(Category).returns(false)
+        category_list.categories.should_not be_blank
+      end
+
+      it 'returns the empty category and a non-empty category for those who can create them' do
+        category_with_topics = Fabricate(:topic, category: Fabricate(:category))
+        Guardian.any_instance.expects(:can_create?).with(Category).returns(true)
+        category_list.categories.should have(3).categories
+        category_list.categories.should include(topic_category)
+      end
 
     end
-
 
     context "with a topic in a category" do
       let!(:topic) { Fabricate(:topic, category: topic_category)}
@@ -76,8 +71,6 @@ describe CategoryList do
       end
     end
 
-
   end
-
 
 end

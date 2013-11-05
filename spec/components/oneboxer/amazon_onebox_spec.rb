@@ -15,7 +15,7 @@ describe Oneboxer::AmazonOnebox do
   end
 
   it "generates the expected onebox for Amazon" do
-    @o.onebox.should == expected_amazon_result
+    @o.onebox.should match_html expected_amazon_result
   end
 
 private
@@ -24,17 +24,15 @@ private
 <div class='onebox-result'>
     <div class='source'>
       <div class='info'>
-        <a href='http://www.amazon.com/Ruby-Programming-Language-David-Flanagan/dp/0596516177' target="_blank">
+        <a href='http://www.amazon.com/Ruby-Programming-Language-David-Flanagan/dp/0596516177' class="track-link" target="_blank">
           <img class='favicon' src="/assets/favicons/amazon.png"> amazon.com
         </a>
       </div>
     </div>
   <div class='onebox-result-body'>
-    <img src="http://ecx.images-amazon.com/images/I/716dULgyHNL._SY180_.jpg" class="thumbnail">
-    <h3><a href="http://www.amazon.com/Ruby-Programming-Language-David-Flanagan/dp/0596516177" target="_blank">The Ruby Programming Language (Paperback)</a></h3>
-    <h4>David Flanagan, Yukihiro Matsumoto</h4>
-      
-The Ruby Programming Language is the authoritative guide to Ruby ...
+    <img src="http://ecx.images-amazon.com/images/I/512Cx%2BnJK8L._BO2,204,203,200_PIsitb-sticker-arrow-click,TopRight,35,-76_AA300_SH20_OU01_.jpg" class="thumbnail">
+    <h3><a href="http://www.amazon.com/Ruby-Programming-Language-David-Flanagan/dp/0596516177" target="_blank">The Ruby Programming Language [Paperback]</a></h3>
+
 
   </div>
   <div class='clearfix'></div>

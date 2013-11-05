@@ -13,19 +13,21 @@ Discourse.ShareLink = Discourse.Model.extend({
     return Discourse.ShareLink.urlFor(this.get('target'), this.get('link'), this.get('topicTitle'));
   }.property('target', 'link', 'topicTitle'),
 
-  title: function() {
-    return Em.String.i18n("share." + this.get('target'));
-  }.property('target'),
+  title: Discourse.computed.i18n('target', 'share.%@'),
 
   iconClass: function() {
     return Discourse.ShareLink.iconClasses[this.get('target')];
+  }.property('target'),
+
+  openInPopup: function() {
+    return( this.get('target') !== 'email' );
   }.property('target')
 
 });
 
 Discourse.ShareLink.reopenClass({
 
-  supportedTargets: ['twitter', 'facebook', 'google+'],
+  supportedTargets: ['twitter', 'facebook', 'google+', 'email'],
 
   urlFor: function(target,link,title) {
     switch(target) {
@@ -35,6 +37,8 @@ Discourse.ShareLink.reopenClass({
         return this.facebookUrl(link,title);
       case 'google+':
         return this.googlePlusUrl(link);
+      case 'email':
+        return this.emailUrl(link,title);
     }
   },
 
@@ -50,10 +54,15 @@ Discourse.ShareLink.reopenClass({
     return ("https://plus.google.com/share?url=" + encodeURIComponent(link));
   },
 
+  emailUrl: function(link, title) {
+    return ("mailto:?to=&subject=" + encodeURIComponent('[' + Discourse.SiteSettings.title + '] ' + title) + "&body=" + encodeURIComponent(link));
+  },
+
   iconClasses: {
     twitter: 'icon-twitter',
     facebook: 'icon-facebook-sign',
-    'google+': 'icon-google-plus'
+    'google+': 'icon-google-plus',
+    email: 'icon-envelope'
   },
 
   popupHeights: {

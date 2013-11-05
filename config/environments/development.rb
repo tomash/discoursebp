@@ -7,7 +7,8 @@ Discourse::Application.configure do
   config.cache_classes = false
 
   # Log error messages when you accidentally call methods on nil.
-  config.whiny_nils = true
+  config.whiny_nils = true unless rails4?
+  config.eager_load = false if rails4?
 
   # Show full error reports and disable caching
   config.consider_all_requests_local       = true
@@ -17,26 +18,33 @@ Discourse::Application.configure do
   config.active_support.deprecation = :log
 
   # Only use best-standards-support built into browsers
-  config.action_dispatch.best_standards_support = :builtin
+  config.action_dispatch.best_standards_support = :builtin unless rails4?
 
   # Do not compress assets
   config.assets.compress = false
 
-  # Expands the lines which load the assets
+  # Don't Digest assets, makes debugging uglier
+  config.assets.digest = false
+
   config.assets.debug = true
 
   config.watchable_dirs['lib'] = [:rb]
 
   config.sass.debug_info = false
-  config.ember.variant = :development
-  config.ember.handlebars_location = "#{Rails.root}/app/assets/javascripts/external/handlebars-1.0.rc.3.js"
-  config.ember.ember_location = "#{Rails.root}/app/assets/javascripts/external/ember.js"
   config.handlebars.precompile = false
 
-  config.action_mailer.delivery_method = :smtp
+  # we recommend you use mailcatcher https://github.com/sj26/mailcatcher
   config.action_mailer.smtp_settings = { address: "localhost", port: 1025 }
+
   config.action_mailer.raise_delivery_errors = true
 
   BetterErrors::Middleware.allow_ip! ENV['TRUSTED_IP'] if ENV['TRUSTED_IP']
+
+  config.enable_mini_profiler = true
+
+  require 'middleware/turbo_dev'
+  config.middleware.insert 0, Middleware::TurboDev
+
+  config.enable_anon_caching = false
 end
 

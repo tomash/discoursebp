@@ -1,4 +1,4 @@
-class PostSerializer < ApplicationSerializer
+class PostSerializer < BasicPostSerializer
 
   # To pass in additional information we might need
   attr_accessor :topic_slug
@@ -7,11 +7,10 @@ class PostSerializer < ApplicationSerializer
   attr_accessor :add_raw
   attr_accessor :single_post_link_counts
   attr_accessor :draft_sequence
+  attr_accessor :post_actions
 
-  attributes :id,
-             :post_number,
+  attributes :post_number,
              :post_type,
-             :created_at,
              :updated_at,
              :reply_count,
              :reply_to_post_number,
@@ -29,35 +28,30 @@ class PostSerializer < ApplicationSerializer
              :can_delete,
              :can_recover,
              :link_counts,
-             :cooked,
              :read,
-             :username,
-             :name,
+             :user_title,
              :reply_to_user,
              :bookmarked,
              :raw,
              :actions_summary,
-             :new_user?,
              :moderator?,
-             :avatar_template,
+             :staff?,
              :user_id,
              :draft_sequence,
              :hidden,
              :hidden_reason_id,
-             :deleted_at
+             :trust_level,
+             :deleted_at,
+             :deleted_by,
+             :user_deleted
 
-
-  def new_user?
-    # 21 calls = 5ms ... if there was a proper date in the RHS it would be 1ms 
-    object.user.created_at > SiteSetting.new_user_period_days.days.ago
-  end
 
   def moderator?
-    object.user.moderator?
+    object.user.try(:moderator?) || false
   end
 
-  def avatar_template
-    object.user.avatar_template
+  def staff?
+    object.user.try(:staff?) || false
   end
 
   def yours
@@ -76,8 +70,11 @@ class PostSerializer < ApplicationSerializer
     scope.can_recover_post?(object)
   end
 
-  def link_counts
+  def display_username
+    object.user.try(:name)
+  end
 
+  def link_counts
     return @single_post_link_counts if @single_post_link_counts.present?
 
     # TODO: This could be better, just porting the old one over
@@ -92,18 +89,6 @@ class PostSerializer < ApplicationSerializer
     end
   end
 
-  def cooked
-    if object.hidden && !scope.is_admin?
-      if scope.current_user && object.user_id == scope.current_user.id
-        I18n.t('flagging.you_must_edit')
-      else
-        I18n.t('flagging.user_must_edit')
-      end
-    else
-      object.filter_quotes(@parent_post)
-    end
-  end
-
   def read
     @topic_view.read?(object.post_number)
   end
@@ -112,31 +97,35 @@ class PostSerializer < ApplicationSerializer
     object.score || 0
   end
 
-  def display_username
-    object.user.name
-  end
-
   def version
     object.cached_version
   end
 
-  def username
-    object.user.username
+  def user_title
+    object.user.try(:title)
   end
 
-  def name
-    object.user.name
+  def trust_level
+    object.user.try(:trust_level)
   end
 
   def reply_to_user
     {
       username: object.reply_to_user.username,
-      name: object.reply_to_user.name
+      avatar_template: object.reply_to_user.avatar_template
     }
   end
 
   def bookmarked
     true
+  end
+
+  def deleted_by
+    BasicUserSerializer.new(object.deleted_by, root: false).as_json
+  end
+
+  def include_deleted_by?
+    scope.is_staff? && object.deleted_by.present?
   end
 
   # Summary of the actions taken on this post
@@ -155,7 +144,7 @@ class PostSerializer < ApplicationSerializer
 
       # The following only applies if you're logged in
       if action_summary[:can_act] && scope.current_user.present?
-        action_summary[:can_clear_flags] = scope.is_admin? && PostActionType.flag_types.values.include?(id)
+        action_summary[:can_clear_flags] = scope.is_staff? && PostActionType.flag_types.values.include?(id)
       end
 
       if post_actions.present? && post_actions.has_key?(id)
@@ -163,8 +152,8 @@ class PostSerializer < ApplicationSerializer
         action_summary[:can_undo] = scope.can_delete?(post_actions[id])
       end
 
-      # anonymize flags
-      if !scope.is_admin? && PostActionType.flag_types.values.include?(id)
+      # only show public data
+      unless scope.is_staff? || PostActionType.public_types.values.include?(id)
         action_summary[:count] = action_summary[:acted] ? 1 : 0
       end
 
@@ -202,6 +191,10 @@ class PostSerializer < ApplicationSerializer
 
   def include_bookmarked?
     post_actions.present? && post_actions.keys.include?(PostActionType.types[:bookmark])
+  end
+
+  def include_display_username?
+    SiteSetting.enable_names?
   end
 
   private

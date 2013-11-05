@@ -6,36 +6,66 @@
   @namespace Discourse
   @module Discourse
 **/
-Discourse.AdminFlagsController = Ember.Controller.extend({
+Discourse.AdminFlagsController = Ember.ArrayController.extend({
 
-  /**
-    Clear all flags on a post
+  actions: {
+    /**
+      Clear all flags on a post
 
-    @method clearFlags
-    @param {Discourse.FlaggedPost} item The post whose flags we want to clear
-  **/
-  clearFlags: function(item) {
-    var _this = this;
-    item.clearFlags().then((function() {
-      _this.content.removeObject(item);
-    }), (function() {
-      bootbox.alert(Em.String.i18n("admin.flags.error"));
-    }));
-  },
+      @method clearFlags
+      @param {Discourse.FlaggedPost} item The post whose flags we want to clear
+    **/
+    disagreeFlags: function(item) {
+      var adminFlagsController = this;
+      item.disagreeFlags().then((function() {
+        adminFlagsController.removeObject(item);
+      }), function() {
+        bootbox.alert(I18n.t("admin.flags.error"));
+      });
+    },
 
-  /**
-    Deletes a post
+    agreeFlags: function(item) {
+      var adminFlagsController = this;
+      item.agreeFlags().then((function() {
+        adminFlagsController.removeObject(item);
+      }), function() {
+        bootbox.alert(I18n.t("admin.flags.error"));
+      });
+    },
 
-    @method deletePost
-    @param {Discourse.FlaggedPost} item The post to delete
-  **/
-  deletePost: function(item) {
-    var _this = this;
-    item.deletePost().then((function() {
-      _this.content.removeObject(item);
-    }), (function() {
-      bootbox.alert(Em.String.i18n("admin.flags.error"));
-    }));
+    deferFlags: function(item) {
+      var adminFlagsController = this;
+      item.deferFlags().then((function() {
+        adminFlagsController.removeObject(item);
+      }), function() {
+        bootbox.alert(I18n.t("admin.flags.error"));
+      });
+    },
+
+    /**
+      Deletes a post
+
+      @method deletePost
+      @param {Discourse.FlaggedPost} post The post to delete
+    **/
+    deletePost: function(post) {
+      var adminFlagsController = this;
+      post.deletePost().then((function() {
+        adminFlagsController.removeObject(post);
+      }), function() {
+        bootbox.alert(I18n.t("admin.flags.error"));
+      });
+    },
+
+    /**
+      Deletes a user and all posts and topics created by that user.
+
+      @method deleteSpammer
+      @param {Discourse.FlaggedPost} item The post to delete
+    **/
+    deleteSpammer: function(item) {
+      item.get('user').deleteAsSpammer(function() { window.location.reload(); });
+    }
   },
 
   /**
@@ -43,17 +73,23 @@ Discourse.AdminFlagsController = Ember.Controller.extend({
 
     @property adminOldFlagsView
   **/
-  adminOldFlagsView: (function() {
-    return this.query === 'old';
-  }).property('query'),
+  adminOldFlagsView: Em.computed.equal('query', 'old'),
 
   /**
     Are we viewing the 'active' view?
 
     @property adminActiveFlagsView
   **/
-  adminActiveFlagsView: (function() {
-    return this.query === 'active';
-  }).property('query')
+  adminActiveFlagsView: Em.computed.equal('query', 'active'),
+
+  loadMore: function(){
+    var flags = this.get('model');
+    return Discourse.FlaggedPost.findAll(this.get('query'),flags.length+1).then(function(data){
+      if(data.length===0){
+        flags.set('allLoaded',true);
+      }
+      flags.addObjects(data);
+    });
+  }
 
 });

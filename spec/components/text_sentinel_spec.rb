@@ -5,9 +5,11 @@ require 'text_sentinel'
 
 describe TextSentinel do
 
+  it "allows utf-8 chars" do
+    TextSentinel.new("йȝîûηыეமிᚉ⠛").text.should == "йȝîûηыეமிᚉ⠛"
+  end
 
   context "entropy" do
-
 
     it "returns 0 for an empty string" do
       TextSentinel.new("").entropy.should == 0
@@ -30,50 +32,31 @@ describe TextSentinel do
     end
 
     it "Works on foreign characters" do
-      TextSentinel.new("去年十社會警告").entropy.should == 7
+      TextSentinel.new("去年十社會警告").entropy.should == 19
+    end
+
+    it "generates enough entropy for short foreign strings" do
+      TextSentinel.new("又一个测").entropy.should == 11
+    end
+
+    it "handles repeated foreign characters" do
+      TextSentinel.new("又一个测试话题" * 3).entropy.should == 18
     end
 
   end
 
-  context "cleaning up" do
-
-    it "allows utf-8 chars" do
-      TextSentinel.new("йȝîûηыეமிᚉ⠛").text.should == "йȝîûηыეமிᚉ⠛"
-    end
-
-    context "interior spaces" do
-
-      let(:spacey_string) { "hello     there's weird     spaces here." }
-      let(:unspacey_string) { "hello there's weird spaces here." }
-
-      it "ignores intra spaces by default" do
-        TextSentinel.new(spacey_string).text.should == spacey_string
+  context 'body_sentinel' do
+    [ 'evil trout is evil',
+      "去年十社會警告",
+      "P.S. Пробирочка очень толковая и весьма умная, так что не обнимайтесь.",
+      "LOOK: 去年十社會警告"
+    ].each do |valid_body|
+      it "handles a valid body in a private message" do
+        expect(TextSentinel.body_sentinel(valid_body, private_message: true)).to be_valid
       end
 
-      it "fixes intra spaces when enabled" do
-        TextSentinel.new(spacey_string, remove_interior_spaces: true).text.should == unspacey_string
-      end
-
-      it "fixes intra spaces in titles" do
-        TextSentinel.title_sentinel(spacey_string).text.should == unspacey_string
-      end
-
-    end
-
-    context "stripping whitespace" do
-      let(:spacey_string) { "   \t  test \t  " }
-      let(:unspacey_string) { "test" }
-
-      it "does not strip leading and trailing whitespace by default" do
-        TextSentinel.new(spacey_string).text.should == spacey_string
-      end
-
-      it "strips leading and trailing whitespace when enabled" do
-        TextSentinel.new(spacey_string, strip: true).text.should == unspacey_string
-      end
-
-      it "strips leading and trailing whitespace in titles" do
-        TextSentinel.title_sentinel(spacey_string).text.should == unspacey_string
+      it "handles a valid body in a public post" do
+        expect(TextSentinel.body_sentinel(valid_body, private_message: false)).to be_valid
       end
     end
 
@@ -107,14 +90,46 @@ describe TextSentinel do
       TextSentinel.new("jfewjfoejwfojeojfoejofjeo3" * 5, max_word_length: 30).should_not be_valid
     end
 
-    it "doesn't except junk symbols as a string" do
+    it "doesn't accept junk symbols as a string" do
       TextSentinel.new("[[[").should_not be_valid
       TextSentinel.new("<<<").should_not be_valid
       TextSentinel.new("{{$!").should_not be_valid
     end
 
+    it "does allow a long alphanumeric string joined with slashes" do
+      TextSentinel.new("gdfgdfgdfg/fgdfgdfgdg/dfgdfgdfgd/dfgdfgdfgf", max_word_length: 30).should be_valid
+    end
+
+    it "does allow a long alphanumeric string joined with dashes" do
+      TextSentinel.new("gdfgdfgdfg-fgdfgdfgdg-dfgdfgdfgd-dfgdfgdfgf", max_word_length: 30).should be_valid
+    end
 
   end
 
+  context 'title_sentinel' do
+
+    it "uses a sensible min entropy value when min title length is less than title_min_entropy" do
+      SiteSetting.stubs(:min_topic_title_length).returns(3)
+      SiteSetting.stubs(:title_min_entropy).returns(10)
+      TextSentinel.title_sentinel('Hey').should be_valid
+    end
+
+  end
+
+  context 'body_sentinel' do
+
+    it "uses a sensible min entropy value when min body length is less than min entropy" do
+      SiteSetting.stubs(:min_post_length).returns(3)
+      SiteSetting.stubs(:body_min_entropy).returns(7)
+      TextSentinel.body_sentinel('Yup').should be_valid
+    end
+
+    it "uses a sensible min entropy value when min pm body length is less than min entropy" do
+      SiteSetting.stubs(:min_post_length).returns(5)
+      SiteSetting.stubs(:min_private_message_post_length).returns(3)
+      SiteSetting.stubs(:body_min_entropy).returns(7)
+      TextSentinel.body_sentinel('Lol', private_message: true).should be_valid
+    end
+  end
 
 end

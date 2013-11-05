@@ -1,3 +1,5 @@
+require_dependency 'search'
+
 class SearchObserver < ActiveRecord::Observer
   observe :topic, :post, :user, :category
 
@@ -5,32 +7,36 @@ class SearchObserver < ActiveRecord::Observer
     HtmlScrubber.scrub(html)
   end
 
-  def self.update_index(table, id, idx)
-    Post.exec_sql("delete from #{table} where id = ?", id)
-    sql = "insert into #{table} (id, search_data) values (?, to_tsvector('english', ?))"
-    begin
-      Post.exec_sql(sql, id, idx)
-    rescue
-      # don't allow concurrency to mess up saving a post
+  def self.update_index(table, id, search_data)
+    table_name = "#{table}_search_data"
+    foreign_key = "#{table}_id"
+
+    # for user login and name use "simple" lowercase stemmer
+    stemmer = table == "user" ? "simple" : Search.long_locale
+
+    # Would be nice to use AR here but not sure how to execut Postgres functions
+    # when inserting data like this.
+    rows = Post.exec_sql_row_count("UPDATE #{table_name} SET search_data = TO_TSVECTOR('#{stemmer}', ?) WHERE #{foreign_key} = ?", search_data, id)
+    if rows == 0
+      Post.exec_sql("INSERT INTO #{table_name} (#{foreign_key}, search_data) VALUES (?, TO_TSVECTOR('#{stemmer}', ?))", id, search_data)
     end
+  rescue
+    # don't allow concurrency to mess up saving a post
   end
 
   def self.update_posts_index(post_id, cooked, title, category)
-    idx = scrub_html_for_search(cooked)
-    idx << " " << title
-    idx << " " << category if category
-    update_index('posts_search', post_id, idx)
+    search_data = scrub_html_for_search(cooked) << " " << title
+    search_data << " " << category if category
+    update_index('post', post_id, search_data)
   end
 
   def self.update_users_index(user_id, username, name)
-    idx = username.dup
-    idx << " " << (name || "")
-
-    update_index('users_search', user_id, idx)
+    search_data = username.dup << " " << (name || "")
+    update_index('user', user_id, search_data)
   end
 
   def self.update_categories_index(category_id, name)
-    update_index('categories_search', category_id, name)
+    update_index('category', category_id, name)
   end
 
   def after_save(obj)

@@ -1,44 +1,36 @@
 require_dependency 'guardian'
 require_dependency 'topic_query'
+require_dependency 'filter_best_posts'
 require_dependency 'summarize'
 
 class TopicView
 
-  attr_reader :topic, :posts, :index_offset, :index_reverse
+  attr_reader :topic, :posts, :guardian, :filtered_posts
   attr_accessor :draft, :draft_key, :draft_sequence
 
   def initialize(topic_id, user=nil, options={})
-    @topic = find_topic(topic_id)
-    raise Discourse::NotFound if @topic.blank?
-
-    # Special case: If the topic is private and the user isn't logged in, ask them
-    # to log in!
-    if @topic.present? && @topic.private_message? && user.blank?
-      raise Discourse::NotLoggedIn.new
-    end
-
-    Guardian.new(user).ensure_can_see!(@topic)
-    @post_number, @page  = options[:post_number], options[:page]
-
-    @limit = options[:limit] || SiteSetting.posts_per_page;
-
-    @filtered_posts = @topic.posts
-    @filtered_posts = @filtered_posts.with_deleted if user.try(:admin?)
-    @filtered_posts = @filtered_posts.best_of if options[:best_of].present?
-
-    if options[:username_filters].present?
-      usernames = options[:username_filters].map{|u| u.downcase}
-      @filtered_posts = @filtered_posts.where('post_number = 1 or user_id in (select u.id from users u where username_lower in (?))', usernames)
-    end
-
     @user = user
+    @topic = find_topic(topic_id)
+    @guardian = Guardian.new(@user)
+    check_and_raise_exceptions
+
+    options.each do |key, value|
+      self.instance_variable_set("@#{key}".to_sym, value)
+    end
+
+    @page = @page.to_i
+    @page = 1 if @page.zero?
+    @limit ||= SiteSetting.posts_per_page
+
+    setup_filtered_posts
+
     @initial_load = true
     @index_reverse = false
 
     filter_posts(options)
 
     @draft_key = @topic.draft_key
-    @draft_sequence = DraftSequence.current(user, @draft_key)
+    @draft_sequence = DraftSequence.current(@user, @draft_key)
   end
 
   def canonical_path
@@ -52,10 +44,16 @@ class TopicView
     path
   end
 
+  def last_post
+    return nil if @posts.blank?
+    @last_post ||= @posts.last
+  end
+
   def next_page
-    last_post = @filtered_posts.last
-    if last_post.present? && (@topic.highest_post_number > last_post.post_number)
-      (@filtered_posts[0].post_number / SiteSetting.posts_per_page) + 1
+    @next_page ||= begin
+      if last_post && (@topic.highest_post_number > last_post.post_number)
+        @page + 1
+      end
     end
   end
 
@@ -75,25 +73,31 @@ class TopicView
     @topic.title
   end
 
-  def filtered_posts_count
-    @filtered_posts_count ||= @filtered_posts.count
+  def desired_post
+    return @desired_post if @desired_post.present?
+    return nil if posts.blank?
+
+    @desired_post = posts.detect {|p| p.post_number == @post_number.to_i}
+    @desired_post ||= posts.first
+    @desired_post
   end
 
   def summary
-    return nil if posts.blank?
-    Summarize.new(posts.first.cooked).summary
+    return nil if desired_post.blank?
+    # TODO, this is actually quite slow, should be cached in the post table
+    Summarize.new(desired_post.cooked).summary
   end
 
   def image_url
-    return nil if posts.blank?
-    posts.first.user.small_avatar_url
+    return nil if desired_post.blank?
+    desired_post.user.try(:small_avatar_url)
   end
 
   def filter_posts(opts = {})
     return filter_posts_near(opts[:post_number].to_i) if opts[:post_number].present?
-    return filter_posts_before(opts[:posts_before].to_i) if opts[:posts_before].present?
-    return filter_posts_after(opts[:posts_after].to_i) if opts[:posts_after].present?
-    return filter_best(opts[:best]) if opts[:best].present?
+    return filter_posts_by_ids(opts[:post_ids]) if opts[:post_ids].present?
+    return filter_best(opts[:best], opts) if opts[:best].present?
+
     filter_posts_paged(opts[:page].to_i)
   end
 
@@ -110,76 +114,24 @@ class TopicView
   # Filter to all posts near a particular post number
   def filter_posts_near(post_number)
 
-    # Find the closest number we have
-    closest_post_id = @filtered_posts.order("@(post_number - #{post_number})").first.try(:id)
-    return nil if closest_post_id.blank?
-
-    closest_index = filtered_post_ids.index(closest_post_id)
-    return nil if closest_index.blank?
-
-    # Make sure to get at least one post before, even with rounding
-    posts_before = (SiteSetting.posts_per_page.to_f / 4).floor
-    posts_before = 1 if posts_before == 0
-
-    min_idx = closest_index - posts_before
-    min_idx = 0 if min_idx < 0
-    max_idx = min_idx + (SiteSetting.posts_per_page - 1)
-
-    # Get a full page even if at the end
-    upper_limit = (filtered_post_ids.length - 1)
-    if max_idx >= upper_limit
-      max_idx = upper_limit
-      min_idx = (upper_limit - SiteSetting.posts_per_page) + 1
-    end
+    min_idx, max_idx = get_minmax_ids(post_number)
 
     filter_posts_in_range(min_idx, max_idx)
   end
 
-  def filtered_post_ids
-    @filtered_post_ids ||= @filtered_posts.order(:sort_order).pluck(:id)
-  end
 
   def filter_posts_paged(page)
-    page ||= 0
-    min = (SiteSetting.posts_per_page * page)
-    max = min + SiteSetting.posts_per_page
+    page = [page, 1].max
+    min = SiteSetting.posts_per_page * (page - 1)
+    max = (min + SiteSetting.posts_per_page) - 1
+
     filter_posts_in_range(min, max)
   end
 
-  # Filter to all posts before a particular post number
-  def filter_posts_before(post_number)
-    @initial_load = false
-
-    sort_order = sort_order_for_post_number(post_number)
-    return nil unless sort_order
-
-    # Find posts before the `sort_order`
-    @posts = @filtered_posts.order('sort_order desc').where("sort_order < ?", sort_order)
-    @index_offset = @posts.count
-    @index_reverse = true
-
-    @posts = @posts.includes(:reply_to_user).includes(:topic).joins(:user).limit(@limit)
-  end
-
-  # Filter to all posts after a particular post number
-  def filter_posts_after(post_number)
-    @initial_load = false
-
-    sort_order = sort_order_for_post_number(post_number)
-    return nil unless sort_order
-
-    @index_offset = @filtered_posts.where("sort_order <= ?", sort_order).count
-    @posts = @filtered_posts.order('sort_order').where("sort_order > ?", sort_order)
-    @posts = @posts.includes(:reply_to_user).includes(:topic).joins(:user).limit(@limit)
-  end
-  
-  def filter_best(max)
-    @index_offset = 0
-    @posts = @filtered_posts.order('percent_rank asc, sort_order asc').where("post_number > 1")
-    @posts = @posts.includes(:reply_to_user).includes(:topic).joins(:user).limit(max)
-    @posts = @posts.to_a
-    @posts.sort!{|a,b| a.post_number <=> b.post_number}
-    @posts
+  def filter_best(max, opts={})
+    filter = FilterBestPosts.new(@topic, @filtered_posts, max, opts)
+    @posts = filter.posts
+    @filtered_posts = filter.filtered_posts
   end
 
   def read?(post_number)
@@ -209,33 +161,12 @@ class TopicView
     @all_post_actions ||= PostAction.counts_for(posts, @user)
   end
 
-  def voted_in_topic?
-    return false
-
-    # all post_actions is not the way to do this, cut down on the query, roll it up into topic if we need it
-
-    @voted_in_topic ||= begin
-      return false unless all_post_actions.present?
-      all_post_actions.values.flatten.map {|ac| ac.keys}.flatten.include?(PostActionType.types[:vote])
-    end
-  end
-
-  def post_action_visibility
-    @post_action_visibility ||= begin
-      result = []
-      PostActionType.types.each do |k, v|
-        result << v if Guardian.new(@user).can_see_post_actors?(@topic, v)
-      end
-      result
-    end
-  end
-
   def links
-    @links ||= @topic.links_grouped
+    @links ||= TopicLink.topic_summary(guardian, @topic.id)
   end
 
   def link_counts
-    @link_counts ||= TopicLinkClick.counts_for(@topic, posts)
+    @link_counts ||= TopicLink.counts_for(guardian,@topic, posts)
   end
 
   # Are we the initial page load? If so, we can return extra information like
@@ -262,6 +193,19 @@ class TopicView
     @filtered_posts.by_newest.with_user.first(25)
   end
 
+
+  def current_post_ids
+    @current_post_ids ||= if @posts.is_a?(Array)
+      @posts.map {|p| p.id }
+    else
+      @posts.pluck(:post_number)
+    end
+  end
+
+  def filtered_post_ids
+    @filtered_post_ids ||= filter_post_ids_by(:sort_order)
+  end
+
   protected
 
   def read_posts_set
@@ -270,9 +214,9 @@ class TopicView
       return result unless @user.present?
       return result unless topic_user.present?
 
-      post_numbers = PostTiming.select(:post_number)
+      post_numbers = PostTiming
                 .where(topic_id: @topic.id, user_id: @user.id)
-                .where(post_number: @posts.pluck(:post_number))
+                .where(post_number: current_post_ids)
                 .pluck(:post_number)
 
       post_numbers.each {|pn| result << pn}
@@ -282,30 +226,91 @@ class TopicView
 
   private
 
-  def filter_posts_in_range(min, max)
-
-    max_index = (filtered_post_ids.length - 1)
-
-    # If we're off the charts, return nil
-    return nil if min > max_index
-
-    # Pin max to the last post
-    max = max_index if max > max_index
-    min = 0 if min < 0
-
-    @index_offset = min
-
+  def filter_posts_by_ids(post_ids)
     # TODO: Sort might be off
-    @posts = Post.where(id: filtered_post_ids[min..max])
+    @posts = Post.where(id: post_ids)
                  .includes(:user)
                  .includes(:reply_to_user)
                  .order('sort_order')
-    @posts = @posts.with_deleted if @user.try(:admin?)
+    @posts = @posts.with_deleted if @user.try(:staff?)
+    @posts
+  end
 
+  def filter_posts_in_range(min, max)
+    post_count = (filtered_post_ids.length - 1)
+
+    max = [max, post_count].min
+
+    return @posts = [] if min > max
+
+    min = [[min, max].min, 0].max
+
+    @posts = filter_posts_by_ids(filtered_post_ids[min..max])
     @posts
   end
 
   def find_topic(topic_id)
-    Topic.where(id: topic_id).includes(:category).first
+    finder = Topic.where(id: topic_id).includes(:category)
+    finder = finder.with_deleted if @user.try(:staff?)
+    finder.first
   end
+
+  def setup_filtered_posts
+    @filtered_posts = @topic.posts
+    @filtered_posts = @filtered_posts.with_deleted if @user.try(:staff?)
+    @filtered_posts = @filtered_posts.best_of if @filter == 'best_of'
+    @filtered_posts = @filtered_posts.where('posts.post_type <> ?', Post.types[:moderator_action]) if @best.present?
+    return unless @username_filters.present?
+    usernames = @username_filters.map{|u| u.downcase}
+    @filtered_posts = @filtered_posts.where('post_number = 1 or user_id in (select u.id from users u where username_lower in (?))', usernames)
+  end
+
+  def check_and_raise_exceptions
+    raise Discourse::NotFound if @topic.blank?
+    # Special case: If the topic is private and the user isn't logged in, ask them
+    # to log in!
+    if @topic.present? && @topic.private_message? && @user.blank?
+      raise Discourse::NotLoggedIn.new
+    end
+    guardian.ensure_can_see!(@topic)
+  end
+
+
+  def filter_post_ids_by(sort_order)
+    @filtered_posts.order(sort_order).pluck(:id)
+  end
+
+  def get_minmax_ids(post_number)
+    # Find the closest number we have
+    closest_index = closest_post_to(post_number)
+    return nil if closest_index.nil?
+
+    # Make sure to get at least one post before, even with rounding
+    posts_before = (SiteSetting.posts_per_page.to_f / 4).floor
+    posts_before = 1 if posts_before.zero?
+
+    min_idx = closest_index - posts_before
+    min_idx = 0 if min_idx < 0
+    max_idx = min_idx + (SiteSetting.posts_per_page - 1)
+
+    # Get a full page even if at the end
+    ensure_full_page(min_idx, max_idx)
+  end
+
+  def ensure_full_page(min, max)
+    upper_limit = (filtered_post_ids.length - 1)
+    if max >= upper_limit
+      return (upper_limit - SiteSetting.posts_per_page) + 1, upper_limit
+    else
+      return min, max
+    end
+  end
+
+  def closest_post_to(post_number)
+    closest_posts = filter_post_ids_by("@(post_number - #{post_number})")
+    return nil if closest_posts.empty?
+
+    filtered_post_ids.index(closest_posts.first)
+  end
+
 end

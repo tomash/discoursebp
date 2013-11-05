@@ -1,27 +1,36 @@
 require_dependency 'oneboxer/handlebars_onebox'
+require_dependency 'twitter_api'
 
 module Oneboxer
   class TwitterOnebox < HandlebarsOnebox
 
-    matcher /^https?:\/\/(?:www\.)?twitter.com\/.*$/
+    unless defined? BASE_URL
+      BASE_URL = 'https://api.twitter.com'.freeze
+    end
+
+    unless defined? REGEX
+      REGEX = /^https?:\/\/(?:www\.)?twitter.com\/(?<user>[^\/]+)\/status\/(?<id>\d+)$/
+    end
+
+    matcher REGEX
+
+    # TODO: use zocial instead
     favicon 'twitter.png'
 
-    def translate_url
-      m = @url.match(/\/(?<user>[^\/]+)\/status\/(?<id>\d+)/mi)
-      return "http://api.twitter.com/1/statuses/show/#{URI::encode(m[:id])}.json" if m.present?
-      @url
+    def fetch_html
+      raise Discourse::SiteSettingMissing if TwitterApi.twitter_credentials_missing?
+
+      # a bit odd, but I think the api expects html
+      TwitterApi.raw_tweet_for(@url.match(REGEX)[:id])
     end
 
     def parse(data)
-
       result = JSON.parse(data)
 
-      result["created_at"] = Time.parse(result["created_at"]).strftime("%I:%M%p - %d %b %y")
+      result['created_at'] =
+        Time.parse(result['created_at']).strftime("%I:%M%p - %d %b %y")
 
-      # Hyperlink URLs
-      URI.extract(result['text'], %w(http https)).each do |url|
-        result['text'].gsub!(url, "<a href='#{url}' target='_blank'>#{url}</a>")
-      end
+      result['text'] = TwitterApi.prettify_tweet(result)
 
       result
     end
