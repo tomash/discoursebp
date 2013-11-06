@@ -98,6 +98,11 @@ PATH
     discourse_plugin (0.0.1)
 
 PATH
+  remote: vendor/gems/discourse_shoutbox
+  specs:
+    discourse_shoutbox (0.0.1)
+
+PATH
   remote: vendor/gems/rails_multisite
   specs:
     rails_multisite (0.0.1)
@@ -476,6 +481,7 @@ DEPENDENCIES
   diffy (>= 3.0)
   discourse_emoji!
   discourse_plugin!
+  discourse_shoutbox!
   email_reply_parser!
   ember-rails
   ember-source (= 1.0.0.rc6.2)
