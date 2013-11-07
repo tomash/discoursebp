@@ -1,17 +1,21 @@
 <div class="container">
   <div id="shoutbox">
-    Hello, Shoutbox. Current shouts: {{shoutCount}}
     {{#if loading}}
       <div class='contents loading'>
         <div class='spinner'>{{i18n loading}}</div>
       </div>
+    {{else}}
+      <ol class="messages">
+      {{#each shout in controller}}
+        <li>
+          <author>
+            {{avatar shout imageSize="tiny"}}
+            {{shout.username}}:
+          </author>
+          <shout>{{stripHTML shout.cooked}}</shout>
+        </li>
+      {{/each}}
+      </ol>
     {{/if}}
-
-    {{#each message in controller}}
-      <p>DUPA DUPA DUPA</p>
-    {{/each}}
-
-    {{outlet shoutboxListView}}
   </div>
-
 </div>
