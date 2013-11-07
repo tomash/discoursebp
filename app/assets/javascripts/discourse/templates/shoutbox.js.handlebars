@@ -1,0 +1,17 @@
+<div class="container">
+  <div id="shoutbox">
+    Hello, Shoutbox. Current shouts: {{shoutCount}}
+    {{#if loading}}
+      <div class='contents loading'>
+        <div class='spinner'>{{i18n loading}}</div>
+      </div>
+    {{/if}}
+
+    {{#each message in controller}}
+      <p>DUPA DUPA DUPA</p>
+    {{/each}}
+
+    {{outlet shoutboxListView}}
+  </div>
+
+</div>
