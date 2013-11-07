@@ -16,7 +16,7 @@ Discourse.ShoutboxController = Ember.ArrayController.extend({
 
     var self = this;
    
-    Discourse.Topic.find(3, {}).then(function(data) {
+    Discourse.Topic.find(4, {}).then(function(data) {
       console.log(data.post_stream);
       messages.set('content', data.post_stream.posts);
       self.set('loading', false);

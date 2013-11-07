@@ -1,0 +1,42 @@
+#shoutbox
+  background: #eeeeee
+  height: 120px
+  font-size: 11px
+  margin-bottom: 14px
+  .shouts
+    height: 100px
+    overflow-y: scroll
+    ol.messages
+      list-style-type: none
+      margin: 0
+      li:nth-of-type(odd)
+        background-color: #f9f9f9
+      li:nth-of-type(even)
+        background-color: white
+      li
+        clear: both
+      author
+        display: block
+        width: 10%
+        text-align: right
+        font-weight: bold
+        float: left
+      shout
+        display: block
+        margin-left: 1%
+        width: 86%
+        text-align: left
+        float: left
+  .new-shout
+    height: 20px
+    input
+      height: 18px
+      margin: 0
+      padding: 0
+      width: 90%
+    button
+      height: 18px
+      margin: 0
+      padding: 0
+      width: 8%
+

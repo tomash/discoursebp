@@ -1,21 +1,27 @@
 <div class="container">
   <div id="shoutbox">
-    {{#if loading}}
-      <div class='contents loading'>
-        <div class='spinner'>{{i18n loading}}</div>
-      </div>
-    {{else}}
-      <ol class="messages">
-      {{#each shout in controller}}
-        <li>
-          <author>
-            {{avatar shout imageSize="tiny"}}
-            {{shout.username}}:
-          </author>
-          <shout>{{stripHTML shout.cooked}}</shout>
-        </li>
-      {{/each}}
-      </ol>
-    {{/if}}
+    <div class="shouts"
+      {{#if loading}}
+        <div class='contents loading'>
+          <div class='spinner'>{{i18n loading}}</div>
+        </div>
+      {{else}}
+        <ol class="messages">
+        {{#each shout in controller}}
+          <li>
+            <author>
+              {{avatar shout imageSize="tiny"}}
+              {{shout.username}}:
+            </author>
+            <shout>{{stripHTML shout.cooked}}</shout>
+          </li>
+        {{/each}}
+        </ol>
+      {{/if}}
+    </div>
+    <div class="new-shout">
+      {{textField tabindex="2" id="shout-body" maxlength="255"}}
+      <button {{action save}} tabindex="4" {{bindAttr class=":btn :btn-primary :create model.cantSubmitPost:disabled"}}>send</button>
+    </div>
   </div>
 </div>
